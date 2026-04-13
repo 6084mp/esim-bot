@@ -5,6 +5,77 @@ from typing import Any
 
 import aiohttp
 
+COUNTRY_CODE_TO_NAME = {
+    "AE": "UAE",
+    "AU": "Australia",
+    "AT": "Austria",
+    "BE": "Belgium",
+    "BG": "Bulgaria",
+    "BH": "Bahrain",
+    "BR": "Brazil",
+    "CA": "Canada",
+    "CH": "Switzerland",
+    "CN": "China",
+    "CY": "Cyprus",
+    "CZ": "Czech Republic",
+    "DE": "Germany",
+    "DK": "Denmark",
+    "EE": "Estonia",
+    "EG": "Egypt",
+    "ES": "Spain",
+    "FI": "Finland",
+    "FR": "France",
+    "GB": "United Kingdom",
+    "GR": "Greece",
+    "HK": "Hong Kong",
+    "HR": "Croatia",
+    "HU": "Hungary",
+    "ID": "Indonesia",
+    "IE": "Ireland",
+    "IL": "Israel",
+    "IN": "India",
+    "IS": "Iceland",
+    "IT": "Italy",
+    "JO": "Jordan",
+    "JP": "Japan",
+    "KE": "Kenya",
+    "KH": "Cambodia",
+    "KR": "South Korea",
+    "KW": "Kuwait",
+    "LK": "Sri Lanka",
+    "LT": "Lithuania",
+    "LU": "Luxembourg",
+    "LV": "Latvia",
+    "MA": "Morocco",
+    "MT": "Malta",
+    "MX": "Mexico",
+    "MY": "Malaysia",
+    "NG": "Nigeria",
+    "NL": "Netherlands",
+    "NO": "Norway",
+    "NP": "Nepal",
+    "NZ": "New Zealand",
+    "OM": "Oman",
+    "PE": "Peru",
+    "PH": "Philippines",
+    "PL": "Poland",
+    "PT": "Portugal",
+    "QA": "Qatar",
+    "RO": "Romania",
+    "SA": "Saudi Arabia",
+    "SE": "Sweden",
+    "SG": "Singapore",
+    "SI": "Slovenia",
+    "SK": "Slovakia",
+    "TH": "Thailand",
+    "TN": "Tunisia",
+    "TR": "Turkey",
+    "TW": "Taiwan",
+    "US": "United States",
+    "VN": "Vietnam",
+    "ZA": "South Africa",
+}
+
 
 class EsimAccessClient:
     BASE_URL = "https://api.esimaccess.com/api/v1/open"
@@ -110,6 +181,57 @@ class EsimAccessClient:
             "raw": raw,
         }
 
+    @staticmethod
+    def _extract_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        data = payload.get("data") or payload.get("result") or []
+        if isinstance(data, dict):
+            for key in ("items", "list", "records", "rows", "packages"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    return [item for item in value if isinstance(item, dict)]
+            return []
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        return []
+
+    @staticmethod
+    def _country_match(raw: dict[str, Any], code: str, country_name: str) -> bool:
+        code_up = code.upper()
+        country_low = country_name.lower()
+        fields = [
+            raw.get("countryCode"),
+            raw.get("country"),
+            raw.get("countryName"),
+            raw.get("region"),
+            raw.get("destination"),
+            raw.get("zone"),
+        ]
+        for value in fields:
+            if value is None:
+                continue
+            val = str(value).strip()
+            if not val:
+                continue
+            if val.upper() == code_up:
+                return True
+            low = val.lower()
+            if country_low and country_low in low:
+                return True
+
+        countries_field = raw.get("countries")
+        if isinstance(countries_field, list):
+            for item in countries_field:
+                if isinstance(item, dict):
+                    v_code = str(item.get("code") or item.get("countryCode") or "").upper()
+                    v_name = str(item.get("name") or item.get("countryName") or "").lower()
+                    if v_code == code_up or (country_low and country_low in v_name):
+                        return True
+                else:
+                    txt = str(item).strip().lower()
+                    if txt == code_up.lower() or (country_low and country_low in txt):
+                        return True
+        return False
+
     async def get_countries(self, search: str | None = None) -> list[dict[str, Any]]:
         payload = await self._request("GET", "/countries")
         data = payload.get("data") or payload.get("result") or []
@@ -129,9 +251,41 @@ class EsimAccessClient:
         return countries
 
     async def get_packages(self, country_code: str) -> list[dict[str, Any]]:
-        payload = await self._request("GET", f"/packages?countryCode={country_code.upper()}")
-        data = payload.get("data") or payload.get("result") or []
-        return [self._normalize_package(item, country_code.upper()) for item in data]
+        code = country_code.upper()
+        country_name = COUNTRY_CODE_TO_NAME.get(code, "")
+
+        attempts: list[dict[str, str]] = [
+            {"countryCode": code},
+            {"country": code},
+        ]
+        if country_name:
+            attempts.extend(
+                [
+                    {"country": country_name},
+                    {"countryName": country_name},
+                    {"region": country_name},
+                ]
+            )
+
+        for params in attempts:
+            try:
+                payload = await self._request("GET", "/packages", params=params)
+            except RuntimeError as exc:
+                text = str(exc).lower()
+                if "error 400" in text or "error 404" in text:
+                    continue
+                raise
+
+            items = self._extract_items(payload)
+            normalized = [self._normalize_package(item, code) for item in items]
+            if normalized:
+                return normalized
+
+        # Fallback: try unfiltered list and filter manually by country fields.
+        payload = await self._request("GET", "/packages")
+        items = self._extract_items(payload)
+        filtered = [item for item in items if self._country_match(item, code, country_name)]
+        return [self._normalize_package(item, code) for item in filtered]
 
     async def purchase_esim(self, package_code: str, external_id: str) -> dict[str, Any]:
         payload = {
