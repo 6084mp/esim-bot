@@ -200,13 +200,11 @@ async def show_country_packages(
     try:
         packages = await catalog_service.get_country_packages(country_code=country_code, use_cache=True)
     except Exception:
-        await _safe_edit_or_send(callback, t(lang, "package_error"), reply_markup=main_menu_keyboard(lang))
-        await callback.answer()
+        await callback.answer(t(lang, "package_error"), show_alert=True)
         return
 
     if not packages:
-        await _safe_edit_or_send(callback, t(lang, "no_packages"), reply_markup=main_menu_keyboard(lang))
-        await callback.answer()
+        await callback.answer(t(lang, "no_packages"), show_alert=True)
         return
 
     sorted_packages = catalog_service.sort_packages(packages, sort_by=sort_by)

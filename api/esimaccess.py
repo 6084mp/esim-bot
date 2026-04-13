@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import aiohttp
@@ -48,8 +49,16 @@ class EsimAccessClient:
 
     @staticmethod
     def _to_float(value: Any) -> float:
-        try:
+        if value is None:
+            return 0.0
+        if isinstance(value, (int, float)):
             return float(value)
+        text = str(value).strip().replace(",", ".")
+        match = re.search(r"-?\d+(?:\.\d+)?", text)
+        if not match:
+            return 0.0
+        try:
+            return float(match.group(0))
         except (TypeError, ValueError):
             return 0.0
 
@@ -61,21 +70,41 @@ class EsimAccessClient:
             return default
 
     def _normalize_package(self, raw: dict[str, Any], fallback_country: str) -> dict[str, Any]:
-        data_mb = self._to_float(raw.get("data") or raw.get("volume") or raw.get("dataMb"))
-        data_gb = self._to_float(raw.get("dataGb") or (data_mb / 1024 if data_mb else 0))
+        data_raw = raw.get("dataGb") or raw.get("data") or raw.get("volume") or raw.get("dataMb")
+        data_gb = 0.0
+        if isinstance(data_raw, str):
+            text = data_raw.strip().lower()
+            number = self._to_float(text)
+            if "mb" in text and "gb" not in text:
+                data_gb = number / 1024
+            else:
+                data_gb = number
+        else:
+            data_mb = self._to_float(raw.get("data") or raw.get("volume") or raw.get("dataMb"))
+            data_gb = self._to_float(raw.get("dataGb") or (data_mb / 1024 if data_mb else 0))
+
         wholesale = self._to_float(
             raw.get("price")
             or raw.get("wholesalePrice")
             or raw.get("basePrice")
             or raw.get("salePrice")
             or raw.get("amount")
+            or raw.get("cost")
         )
+
+        days_raw = raw.get("validity") or raw.get("days") or raw.get("durationDays") or raw.get("duration")
+        days = self._to_int(days_raw, default=0)
+        if days <= 0 and isinstance(days_raw, str):
+            days = self._to_int(self._to_float(days_raw), default=1)
+        if days <= 0:
+            days = 1
+
         return {
             "code": str(raw.get("packageCode") or raw.get("code") or raw.get("id") or ""),
             "country": str(raw.get("countryCode") or raw.get("country") or fallback_country).upper(),
             "title": str(raw.get("name") or raw.get("title") or "eSIM plan"),
             "data_gb": round(data_gb, 2),
-            "days": self._to_int(raw.get("validity") or raw.get("days") or raw.get("durationDays"), default=1),
+            "days": days,
             "wholesale_price": wholesale,
             "popularity_score": self._to_float(raw.get("soldCount") or raw.get("orderCount") or raw.get("popularity")),
             "raw": raw,
