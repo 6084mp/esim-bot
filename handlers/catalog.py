@@ -34,6 +34,17 @@ async def _safe_edit_or_send(
         await callback.message.answer(text, reply_markup=reply_markup)
 
 
+async def _safe_callback_answer(
+    callback: CallbackQuery,
+    text: str | None = None,
+    show_alert: bool = False,
+) -> None:
+    try:
+        await callback.answer(text=text, show_alert=show_alert)
+    except TelegramBadRequest:
+        return
+
+
 def _safe_page(total_items: int, page_size: int, requested_page: int) -> int:
     if total_items <= 0:
         return 0
@@ -168,7 +179,7 @@ async def countries_page(
             return
         countries = await catalog_service.get_countries_by_region(regions[region_idx])
         countries_map[str(region_idx)] = countries
-        await state.update_data(countries_by_region=countries_map)
+        await state.update_data(countries_by_region=countries_map, selected_region_idx=region_idx)
 
     if not countries:
         await _safe_edit_or_send(callback, t(lang, "no_country_found"), reply_markup=main_menu_keyboard(lang))
@@ -183,7 +194,7 @@ async def countries_page(
         t(lang, "choose_country", region=_region_label(region_name, lang)),
         reply_markup=countries_keyboard(countries, region_idx=region_idx, page=page, lang=lang),
     )
-    await callback.answer()
+    await _safe_callback_answer(callback)
 
 
 @router.callback_query(F.data.startswith("country:"))
@@ -195,20 +206,35 @@ async def show_country_packages(
 ) -> None:
     _, country_code = callback.data.split(":", 1)
     lang = await get_user_language(session_factory, callback.from_user.id)
+    await _safe_callback_answer(callback)
 
     sort_by = "value"
+    state_data = await state.get_data()
+    selected_region_idx = state_data.get("selected_region_idx")
+    countries_map = state_data.get("countries_by_region") or {}
+
+    fallback_markup = main_menu_keyboard(lang)
+    if isinstance(selected_region_idx, int):
+        selected_countries = countries_map.get(str(selected_region_idx)) or []
+        if selected_countries:
+            fallback_markup = countries_keyboard(
+                selected_countries,
+                region_idx=selected_region_idx,
+                page=0,
+                lang=lang,
+            )
+
     try:
         packages = await catalog_service.get_country_packages(country_code=country_code, use_cache=True)
     except Exception:
-        await callback.answer(t(lang, "package_error"), show_alert=True)
+        await _safe_edit_or_send(callback, t(lang, "package_error"), reply_markup=fallback_markup)
         return
 
     if not packages:
-        await callback.answer(t(lang, "no_packages"), show_alert=True)
+        await _safe_edit_or_send(callback, t(lang, "no_packages"), reply_markup=fallback_markup)
         return
 
     sorted_packages = catalog_service.sort_packages(packages, sort_by=sort_by)
-    state_data = await state.get_data()
     country_packages = state_data.get("country_packages") or {}
     country_packages[country_code.upper()] = packages
 
@@ -230,7 +256,6 @@ async def show_country_packages(
             lang=lang,
         ),
     )
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("pkgpage:"))
