@@ -5,11 +5,75 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from utils.i18n import t
 
+ALPHA3_TO_ALPHA2 = {
+    "ARE": "AE",
+    "AUS": "AU",
+    "AUT": "AT",
+    "BEL": "BE",
+    "BGR": "BG",
+    "BHR": "BH",
+    "BRA": "BR",
+    "CAN": "CA",
+    "CHE": "CH",
+    "CHN": "CN",
+    "CYP": "CY",
+    "CZE": "CZ",
+    "DEU": "DE",
+    "DNK": "DK",
+    "EGY": "EG",
+    "ESP": "ES",
+    "EST": "EE",
+    "FIN": "FI",
+    "FRA": "FR",
+    "GBR": "GB",
+    "GRC": "GR",
+    "HKG": "HK",
+    "HRV": "HR",
+    "HUN": "HU",
+    "IDN": "ID",
+    "IND": "IN",
+    "IRL": "IE",
+    "ISL": "IS",
+    "ISR": "IL",
+    "ITA": "IT",
+    "JPN": "JP",
+    "KOR": "KR",
+    "KWT": "KW",
+    "LTU": "LT",
+    "LUX": "LU",
+    "LVA": "LV",
+    "MEX": "MX",
+    "MYS": "MY",
+    "NLD": "NL",
+    "NOR": "NO",
+    "NZL": "NZ",
+    "OMN": "OM",
+    "PHL": "PH",
+    "POL": "PL",
+    "PRT": "PT",
+    "QAT": "QA",
+    "ROU": "RO",
+    "SAU": "SA",
+    "SGP": "SG",
+    "SVK": "SK",
+    "SVN": "SI",
+    "SWE": "SE",
+    "THA": "TH",
+    "TUN": "TN",
+    "TUR": "TR",
+    "TWN": "TW",
+    "USA": "US",
+    "VNM": "VN",
+    "ZAF": "ZA",
+}
+
 
 def _flag_emoji(country_code: str) -> str:
-    code = (country_code or "").upper()
+    code = (country_code or "").upper().strip()
+    if len(code) == 3:
+        code = ALPHA3_TO_ALPHA2.get(code, "")
     if len(code) != 2 or not code.isalpha():
-        return ""
+        return "🏳️"
     return chr(0x1F1E6 + ord(code[0]) - ord("A")) + chr(0x1F1E6 + ord(code[1]) - ord("A"))
 
 

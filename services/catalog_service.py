@@ -114,6 +114,68 @@ RU_COUNTRY_NAMES: dict[str, str] = {
     "ZA": "ЮАР",
 }
 
+ALPHA3_TO_ALPHA2 = {
+    "ARE": "AE",
+    "AUS": "AU",
+    "AUT": "AT",
+    "BEL": "BE",
+    "BGR": "BG",
+    "BHR": "BH",
+    "BRA": "BR",
+    "CAN": "CA",
+    "CHE": "CH",
+    "CHN": "CN",
+    "CYP": "CY",
+    "CZE": "CZ",
+    "DEU": "DE",
+    "DNK": "DK",
+    "EGY": "EG",
+    "ESP": "ES",
+    "EST": "EE",
+    "FIN": "FI",
+    "FRA": "FR",
+    "GBR": "GB",
+    "GRC": "GR",
+    "HKG": "HK",
+    "HRV": "HR",
+    "HUN": "HU",
+    "IDN": "ID",
+    "IND": "IN",
+    "IRL": "IE",
+    "ISL": "IS",
+    "ISR": "IL",
+    "ITA": "IT",
+    "JPN": "JP",
+    "KOR": "KR",
+    "KWT": "KW",
+    "LTU": "LT",
+    "LUX": "LU",
+    "LVA": "LV",
+    "MEX": "MX",
+    "MYS": "MY",
+    "NLD": "NL",
+    "NOR": "NO",
+    "NZL": "NZ",
+    "OMN": "OM",
+    "PHL": "PH",
+    "POL": "PL",
+    "PRT": "PT",
+    "QAT": "QA",
+    "ROU": "RO",
+    "SAU": "SA",
+    "SGP": "SG",
+    "SVK": "SK",
+    "SVN": "SI",
+    "SWE": "SE",
+    "THA": "TH",
+    "TUN": "TN",
+    "TUR": "TR",
+    "TWN": "TW",
+    "USA": "US",
+    "VNM": "VN",
+    "ZAF": "ZA",
+}
+
 FALLBACK_COUNTRIES: list[dict[str, Any]] = [
     {"code": "AL", "name": "Albania", "region": "Europe"},
     {"code": "AT", "name": "Austria", "region": "Europe"},
@@ -212,6 +274,13 @@ class CatalogService:
     def _local_name_ru(name_en: str, code: str) -> str:
         return RU_COUNTRY_NAMES.get(code.upper(), name_en)
 
+    @staticmethod
+    def _normalize_country_code(code: str) -> str:
+        code_up = (code or "").upper().strip()
+        if len(code_up) == 3:
+            return ALPHA3_TO_ALPHA2.get(code_up, code_up)
+        return code_up
+
     async def get_all_countries(self, use_cache: bool = True) -> list[dict[str, Any]]:
         cache_key = "__countries__"
         if use_cache:
@@ -229,11 +298,11 @@ class CatalogService:
 
         normalized = [
             {
-                "code": c["code"],
-                "name_en": c.get("name") or c.get("name_en") or c["code"],
+                "code": self._normalize_country_code(c["code"]),
+                "name_en": c.get("name") or c.get("name_en") or self._normalize_country_code(c["code"]),
                 "name_ru": self._local_name_ru(
-                    c.get("name") or c.get("name_en") or c["code"],
-                    c["code"],
+                    c.get("name") or c.get("name_en") or self._normalize_country_code(c["code"]),
+                    self._normalize_country_code(c["code"]),
                 ),
                 "region": self._normalize_region(c.get("region")),
                 "popularity_score": float(c.get("popularity_score") or 0),
@@ -268,7 +337,14 @@ class CatalogService:
             if cached is not None:
                 return cached
 
-        packages = await self.api_client.get_packages(country_code=key)
+        try:
+            packages = await self.api_client.get_packages(country_code=key)
+        except RuntimeError as exc:
+            error_text = str(exc).lower()
+            if "error 400" in error_text or "error 404" in error_text:
+                packages = []
+            else:
+                raise
         priced_packages: list[dict[str, Any]] = []
 
         for package in packages:
