@@ -367,12 +367,34 @@ class EsimAccessClient:
             "quantity": 1,
             "externalOrderNo": external_id,
         }
-        response = await self._request("POST", "/orders", json=payload)
-        data = response.get("data") or response.get("result") or response
-        return {
-            "provider_order_no": str(data.get("orderNo") or data.get("id") or ""),
-            "raw": data,
-        }
+        attempts: list[str] = [
+            "/esim/order",  # official endpoint from Postman collection
+            "/orders",      # legacy fallback
+        ]
+        last_error: Exception | None = None
+        for path in attempts:
+            try:
+                response = await self._request("POST", path, json=payload)
+                data = response.get("data") or response.get("result") or response
+                return {
+                    "provider_order_no": str(
+                        data.get("orderNo")
+                        or data.get("orderId")
+                        or data.get("id")
+                        or data.get("transactionId")
+                        or ""
+                    ),
+                    "raw": data,
+                }
+            except RuntimeError as exc:
+                last_error = exc
+                if "error 404" in str(exc).lower():
+                    continue
+                raise
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("Provider order endpoint is unavailable")
 
     async def get_order_detail(self, provider_order_no: str) -> dict[str, Any]:
         response = await self._request("GET", f"/orders/{provider_order_no}")
