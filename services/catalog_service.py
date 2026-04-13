@@ -176,6 +176,77 @@ ALPHA3_TO_ALPHA2 = {
     "ZAF": "ZA",
 }
 
+COUNTRY_NAME_BY_CODE: dict[str, str] = {
+    "AE": "UAE",
+    "AU": "Australia",
+    "AT": "Austria",
+    "BE": "Belgium",
+    "BG": "Bulgaria",
+    "BH": "Bahrain",
+    "BR": "Brazil",
+    "CA": "Canada",
+    "CH": "Switzerland",
+    "CN": "China",
+    "CY": "Cyprus",
+    "CZ": "Czech Republic",
+    "DE": "Germany",
+    "DK": "Denmark",
+    "EE": "Estonia",
+    "EG": "Egypt",
+    "ES": "Spain",
+    "FI": "Finland",
+    "FR": "France",
+    "GB": "United Kingdom",
+    "GR": "Greece",
+    "HK": "Hong Kong",
+    "HR": "Croatia",
+    "HU": "Hungary",
+    "ID": "Indonesia",
+    "IE": "Ireland",
+    "IL": "Israel",
+    "IN": "India",
+    "IS": "Iceland",
+    "IT": "Italy",
+    "JO": "Jordan",
+    "JP": "Japan",
+    "KE": "Kenya",
+    "KH": "Cambodia",
+    "KR": "South Korea",
+    "KW": "Kuwait",
+    "LK": "Sri Lanka",
+    "LT": "Lithuania",
+    "LU": "Luxembourg",
+    "LV": "Latvia",
+    "MA": "Morocco",
+    "MT": "Malta",
+    "MX": "Mexico",
+    "MY": "Malaysia",
+    "NG": "Nigeria",
+    "NL": "Netherlands",
+    "NO": "Norway",
+    "NP": "Nepal",
+    "NZ": "New Zealand",
+    "OM": "Oman",
+    "PE": "Peru",
+    "PH": "Philippines",
+    "PL": "Poland",
+    "PT": "Portugal",
+    "QA": "Qatar",
+    "RO": "Romania",
+    "SA": "Saudi Arabia",
+    "SE": "Sweden",
+    "SG": "Singapore",
+    "SI": "Slovenia",
+    "SK": "Slovakia",
+    "TH": "Thailand",
+    "TN": "Tunisia",
+    "TR": "Turkey",
+    "TW": "Taiwan",
+    "US": "United States",
+    "VN": "Vietnam",
+    "ZA": "South Africa",
+}
+
 FALLBACK_COUNTRIES: list[dict[str, Any]] = [
     {"code": "AL", "name": "Albania", "region": "Europe"},
     {"code": "AT", "name": "Austria", "region": "Europe"},
@@ -281,6 +352,14 @@ class CatalogService:
             return ALPHA3_TO_ALPHA2.get(code_up, code_up)
         return code_up
 
+    @staticmethod
+    def _fallback_region_map() -> dict[str, str]:
+        return {item["code"].upper(): item["region"] for item in FALLBACK_COUNTRIES}
+
+    @staticmethod
+    def _fallback_name_map() -> dict[str, str]:
+        return {item["code"].upper(): item["name"] for item in FALLBACK_COUNTRIES}
+
     async def get_all_countries(self, use_cache: bool = True) -> list[dict[str, Any]]:
         cache_key = "__countries__"
         if use_cache:
@@ -288,28 +367,94 @@ class CatalogService:
             if cached is not None:
                 return cached
 
+        fallback_regions = self._fallback_region_map()
+        fallback_names = self._fallback_name_map()
+        country_map: dict[str, dict[str, Any]] = {}
+
+        # 1) Try official countries endpoint first.
         try:
             countries = await self.api_client.get_countries()
         except Exception:
-            countries = FALLBACK_COUNTRIES
+            countries = []
 
-        if not countries:
-            countries = FALLBACK_COUNTRIES
-
-        normalized = [
-            {
-                "code": self._normalize_country_code(c["code"]),
-                "name_en": c.get("name") or c.get("name_en") or self._normalize_country_code(c["code"]),
-                "name_ru": self._local_name_ru(
-                    c.get("name") or c.get("name_en") or self._normalize_country_code(c["code"]),
-                    self._normalize_country_code(c["code"]),
-                ),
-                "region": self._normalize_region(c.get("region")),
+        for c in countries:
+            if not c.get("code"):
+                continue
+            code = self._normalize_country_code(c["code"])
+            if len(code) != 2:
+                continue
+            name_en = c.get("name") or c.get("name_en") or fallback_names.get(code) or code
+            region = c.get("region") or fallback_regions.get(code) or "Other"
+            country_map[code] = {
+                "code": code,
+                "name_en": name_en,
+                "name_ru": self._local_name_ru(name_en, code),
+                "region": self._normalize_region(region),
                 "popularity_score": float(c.get("popularity_score") or 0),
             }
-            for c in countries
-            if c.get("code") and c.get("name")
-        ]
+
+        # 2) Enrich with package list (stable path from your older working version).
+        try:
+            all_packages = await self.api_client.get_all_packages()
+        except Exception:
+            all_packages = []
+
+        for pkg in all_packages:
+            raw = pkg.get("raw", {})
+            raw_code = (
+                raw.get("countryCode")
+                or raw.get("country")
+                or raw.get("locationCode")
+                or pkg.get("country")
+                or pkg.get("location_code")
+                or ""
+            )
+            code = self._normalize_country_code(str(raw_code))
+            if len(code) != 2:
+                continue
+
+            net_list = raw.get("locationNetworkList")
+            location_name = ""
+            if isinstance(net_list, list) and net_list and isinstance(net_list[0], dict):
+                location_name = str(net_list[0].get("locationName") or "").strip()
+
+            name_en = (
+                country_map.get(code, {}).get("name_en")
+                or location_name
+                or raw.get("countryName")
+                or fallback_names.get(code)
+                or COUNTRY_NAME_BY_CODE.get(code)
+                or code
+            )
+            region = country_map.get(code, {}).get("region") or fallback_regions.get(code) or "Other"
+            popularity = max(
+                float(country_map.get(code, {}).get("popularity_score") or 0),
+                float(pkg.get("popularity_score") or 0),
+            )
+            country_map[code] = {
+                "code": code,
+                "name_en": str(name_en),
+                "name_ru": self._local_name_ru(str(name_en), code),
+                "region": self._normalize_region(str(region)),
+                "popularity_score": popularity,
+            }
+
+        # 3) Safety fallback list.
+        if not country_map:
+            for c in FALLBACK_COUNTRIES:
+                code = self._normalize_country_code(c["code"])
+                if len(code) != 2:
+                    continue
+                name_en = c["name"]
+                country_map[code] = {
+                    "code": code,
+                    "name_en": name_en,
+                    "name_ru": self._local_name_ru(name_en, code),
+                    "region": self._normalize_region(c["region"]),
+                    "popularity_score": 0.0,
+                }
+
+        normalized = list(country_map.values())
 
         normalized.sort(key=lambda x: x["name_en"].lower())
         if use_cache:
@@ -345,6 +490,29 @@ class CatalogService:
                 packages = []
             else:
                 raise
+
+        # Fallback strategy from previously working flow: fetch all packages and filter locally.
+        if not packages:
+            try:
+                all_packages = await self.api_client.get_all_packages()
+            except Exception:
+                all_packages = []
+
+            if all_packages:
+                filtered: list[dict[str, Any]] = []
+                for pkg in all_packages:
+                    raw = pkg.get("raw", {})
+                    candidates = [
+                        self._normalize_country_code(str(pkg.get("country") or "")),
+                        self._normalize_country_code(str(pkg.get("location_code") or "")),
+                        self._normalize_country_code(str(raw.get("countryCode") or "")),
+                        self._normalize_country_code(str(raw.get("country") or "")),
+                        self._normalize_country_code(str(raw.get("locationCode") or "")),
+                    ]
+                    if key in candidates:
+                        filtered.append(pkg)
+                packages = filtered
+
         priced_packages: list[dict[str, Any]] = []
 
         for package in packages:

@@ -172,7 +172,13 @@ class EsimAccessClient:
 
         return {
             "code": str(raw.get("packageCode") or raw.get("code") or raw.get("id") or ""),
-            "country": str(raw.get("countryCode") or raw.get("country") or fallback_country).upper(),
+            "country": str(
+                raw.get("countryCode")
+                or raw.get("country")
+                or raw.get("locationCode")
+                or fallback_country
+            ).upper(),
+            "location_code": str(raw.get("locationCode") or "").upper(),
             "title": str(raw.get("name") or raw.get("title") or "eSIM plan"),
             "data_gb": round(data_gb, 2),
             "days": days,
@@ -202,6 +208,8 @@ class EsimAccessClient:
             raw.get("countryCode"),
             raw.get("country"),
             raw.get("countryName"),
+            raw.get("locationCode"),
+            raw.get("locationName"),
             raw.get("region"),
             raw.get("destination"),
             raw.get("zone"),
@@ -331,6 +339,11 @@ class EsimAccessClient:
             seen.add(value)
             deduped.append(value)
         return deduped
+
+    async def get_all_packages(self) -> list[dict[str, Any]]:
+        payload = await self._request("POST", "/package/list", json={})
+        items = self._extract_items(payload)
+        return [self._normalize_package(item, str(item.get("locationCode") or "")) for item in items]
 
     async def get_packages(self, country_code: str) -> list[dict[str, Any]]:
         code = country_code.upper()
