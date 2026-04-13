@@ -183,9 +183,9 @@ class EsimAccessClient:
 
     @staticmethod
     def _extract_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
-        data = payload.get("data") or payload.get("result") or []
+        data = payload.get("data") or payload.get("result") or payload.get("obj") or []
         if isinstance(data, dict):
-            for key in ("items", "list", "records", "rows", "packages"):
+            for key in ("items", "list", "records", "rows", "packages", "packageList", "locationList", "data"):
                 value = data.get(key)
                 if isinstance(value, list):
                     return [item for item in value if isinstance(item, dict)]
@@ -266,9 +266,9 @@ class EsimAccessClient:
             countries = [
                 {
                     "code": str(
-                        item.get("code")
-                        or item.get("countryCode")
+                        item.get("countryCode")
                         or item.get("iso2")
+                        or item.get("code")
                         or item.get("locationCode")
                         or ""
                     ).upper(),
@@ -301,9 +301,41 @@ class EsimAccessClient:
             countries = [c for c in countries if q in c["name"].lower() or q in c["code"].lower()]
         return countries
 
+    async def _resolve_location_codes(self, country_code: str, country_name: str) -> list[str]:
+        try:
+            payload = await self._request("POST", "/location/list", json={})
+        except Exception:
+            return []
+
+        items = self._extract_items(payload)
+        if not items:
+            return []
+
+        code = country_code.upper()
+        name_low = (country_name or "").lower()
+        location_codes: list[str] = []
+        for item in items:
+            item_code = str(item.get("countryCode") or item.get("iso2") or item.get("code") or "").upper()
+            item_name = str(item.get("countryName") or item.get("locationName") or item.get("name") or "").lower()
+            location_code = str(item.get("locationCode") or "").strip()
+            if not location_code:
+                continue
+            if item_code == code or (name_low and name_low in item_name):
+                location_codes.append(location_code)
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for value in location_codes:
+            if value in seen:
+                continue
+            seen.add(value)
+            deduped.append(value)
+        return deduped
+
     async def get_packages(self, country_code: str) -> list[dict[str, Any]]:
         code = country_code.upper()
         country_name = COUNTRY_CODE_TO_NAME.get(code, "")
+        location_codes = await self._resolve_location_codes(code, country_name)
         # Primary endpoint from official Postman collection:
         # POST /api/v1/open/package/list
         post_attempts: list[dict[str, Any]] = [
@@ -316,6 +348,13 @@ class EsimAccessClient:
                 [
                     {"country": country_name},
                     {"countryName": country_name},
+                ]
+            )
+        for location_code in location_codes:
+            post_attempts.extend(
+                [
+                    {"locationCode": location_code},
+                    {"locationCode": location_code, "countryCode": code},
                 ]
             )
 
