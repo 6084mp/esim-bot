@@ -140,28 +140,60 @@ class EsimAccessClient:
         except (TypeError, ValueError):
             return default
 
+    @staticmethod
+    def _is_int_like(value: Any) -> bool:
+        if isinstance(value, int):
+            return True
+        if isinstance(value, float):
+            return value.is_integer()
+        if isinstance(value, str):
+            text = value.strip().replace(",", "")
+            return text.isdigit()
+        return False
+
     def _normalize_package(self, raw: dict[str, Any], fallback_country: str) -> dict[str, Any]:
         data_raw = raw.get("dataGb") or raw.get("data") or raw.get("volume") or raw.get("dataMb")
+        volume_unit = str(raw.get("volumeUnit") or raw.get("dataUnit") or "").upper().strip()
         data_gb = 0.0
         if isinstance(data_raw, str):
             text = data_raw.strip().lower()
             number = self._to_float(text)
-            if "mb" in text and "gb" not in text:
+            if "kb" in text:
+                data_gb = number / 1024 / 1024
+            elif "mb" in text and "gb" not in text:
                 data_gb = number / 1024
             else:
                 data_gb = number
         else:
-            data_mb = self._to_float(raw.get("data") or raw.get("volume") or raw.get("dataMb"))
-            data_gb = self._to_float(raw.get("dataGb") or (data_mb / 1024 if data_mb else 0))
+            number = self._to_float(data_raw)
+            if volume_unit in {"KB", "KBYTE", "KBYTES"}:
+                data_gb = number / 1024 / 1024
+            elif volume_unit in {"MB", "MBYTE", "MBYTES"}:
+                data_gb = number / 1024
+            elif volume_unit in {"GB", "GBYTE", "GBYTES"}:
+                data_gb = number
+            else:
+                # Heuristic: API often returns volume in KB (example: 10485760 = 10GB)
+                if number >= 1024 * 1024:
+                    data_gb = number / 1024 / 1024
+                elif number >= 1024:
+                    data_gb = number / 1024
+                else:
+                    data_gb = number
 
-        wholesale = self._to_float(
-            raw.get("price")
-            or raw.get("wholesalePrice")
-            or raw.get("basePrice")
-            or raw.get("salePrice")
-            or raw.get("amount")
-            or raw.get("cost")
-        )
+        price_fields = [
+            raw.get("price"),
+            raw.get("wholesalePrice"),
+            raw.get("basePrice"),
+            raw.get("salePrice"),
+            raw.get("amount"),
+            raw.get("cost"),
+        ]
+        wholesale_raw = next((v for v in price_fields if v not in (None, "")), 0)
+        wholesale = self._to_float(wholesale_raw)
+        # API frequently returns minor units (cents): 1220 -> $12.20
+        if wholesale >= 100 and self._is_int_like(wholesale_raw):
+            wholesale = wholesale / 100
 
         days_raw = raw.get("validity") or raw.get("days") or raw.get("durationDays") or raw.get("duration")
         days = self._to_int(days_raw, default=0)
@@ -245,7 +277,7 @@ class EsimAccessClient:
         # POST /api/v1/open/location/list
         countries: list[dict[str, Any]] = []
         attempts: list[tuple[str, str, dict[str, Any] | None]] = [
-            ("POST", "/location/list", {}),
+            ("POST", "/location/list", {"type": 0, "pageNum": 1, "pageSize": 3000}),
             ("GET", "/countries", None),  # backward-compatible fallback
         ]
 
@@ -311,7 +343,7 @@ class EsimAccessClient:
 
     async def _resolve_location_codes(self, country_code: str, country_name: str) -> list[str]:
         try:
-            payload = await self._request("POST", "/location/list", json={})
+            payload = await self._request("POST", "/location/list", json={"type": 0, "pageNum": 1, "pageSize": 3000})
         except Exception:
             return []
 
@@ -341,7 +373,7 @@ class EsimAccessClient:
         return deduped
 
     async def get_all_packages(self) -> list[dict[str, Any]]:
-        payload = await self._request("POST", "/package/list", json={})
+        payload = await self._request("POST", "/package/list", json={"type": 0, "pageNum": 1, "pageSize": 3000})
         items = self._extract_items(payload)
         return [self._normalize_package(item, str(item.get("locationCode") or "")) for item in items]
 
@@ -352,22 +384,22 @@ class EsimAccessClient:
         # Primary endpoint from official Postman collection:
         # POST /api/v1/open/package/list
         post_attempts: list[dict[str, Any]] = [
-            {},
-            {"countryCode": code},
-            {"country": code},
+            {"type": 0, "pageNum": 1, "pageSize": 3000},
+            {"type": 0, "pageNum": 1, "pageSize": 3000, "countryCode": code},
+            {"type": 0, "pageNum": 1, "pageSize": 3000, "country": code},
         ]
         if country_name:
             post_attempts.extend(
                 [
-                    {"country": country_name},
-                    {"countryName": country_name},
+                    {"type": 0, "pageNum": 1, "pageSize": 3000, "country": country_name},
+                    {"type": 0, "pageNum": 1, "pageSize": 3000, "countryName": country_name},
                 ]
             )
         for location_code in location_codes:
             post_attempts.extend(
                 [
-                    {"locationCode": location_code},
-                    {"locationCode": location_code, "countryCode": code},
+                    {"type": 0, "pageNum": 1, "pageSize": 3000, "locationCode": location_code},
+                    {"type": 0, "pageNum": 1, "pageSize": 3000, "locationCode": location_code, "countryCode": code},
                 ]
             )
 
