@@ -41,6 +41,12 @@ def _safe_page(total_items: int, page_size: int, requested_page: int) -> int:
     return max(0, min(requested_page, max_page))
 
 
+def _region_label(region: str, lang: str) -> str:
+    key = f"region_{region.lower().replace(' ', '_')}"
+    value = t(lang, key)
+    return value if value != key else region
+
+
 @router.callback_query(F.data == "menu:buy")
 async def buy_esim(
     callback: CallbackQuery,
@@ -87,7 +93,7 @@ async def region_page(
         await callback.answer()
         return
 
-    page = _safe_page(len(regions), 3, requested_page)
+    page = _safe_page(len(regions), 8, requested_page)
     await state.update_data(regions=regions)
     await _safe_edit_or_send(
         callback,
@@ -132,7 +138,7 @@ async def region_pick(
 
     await _safe_edit_or_send(
         callback,
-        t(lang, "choose_country", region=region_name),
+        t(lang, "choose_country", region=_region_label(region_name, lang)),
         reply_markup=countries_keyboard(countries, region_idx=region_idx, page=0, lang=lang),
     )
     await callback.answer()
@@ -169,12 +175,12 @@ async def countries_page(
         await callback.answer()
         return
 
-    page = _safe_page(len(countries), 3, requested_page)
+    page = _safe_page(len(countries), 20, requested_page)
     region_name = regions[region_idx] if region_idx < len(regions) else ""
 
     await _safe_edit_or_send(
         callback,
-        t(lang, "choose_country", region=region_name),
+        t(lang, "choose_country", region=_region_label(region_name, lang)),
         reply_markup=countries_keyboard(countries, region_idx=region_idx, page=page, lang=lang),
     )
     await callback.answer()
@@ -194,7 +200,7 @@ async def show_country_packages(
     try:
         packages = await catalog_service.get_country_packages(country_code=country_code, use_cache=True)
     except Exception:
-        await _safe_edit_or_send(callback, t(lang, "country_error"), reply_markup=main_menu_keyboard(lang))
+        await _safe_edit_or_send(callback, t(lang, "package_error"), reply_markup=main_menu_keyboard(lang))
         await callback.answer()
         return
 
@@ -254,7 +260,7 @@ async def package_page(
         return
 
     sorted_packages = catalog_service.sort_packages(packages, sort_by=sort_by)
-    page = _safe_page(len(sorted_packages), 2, requested_page)
+    page = _safe_page(len(sorted_packages), 4, requested_page)
 
     await state.update_data(
         country_packages=country_packages,

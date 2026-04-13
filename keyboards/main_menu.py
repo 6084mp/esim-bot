@@ -6,6 +6,19 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from utils.i18n import t
 
 
+def _flag_emoji(country_code: str) -> str:
+    code = (country_code or "").upper()
+    if len(code) != 2 or not code.isalpha():
+        return ""
+    return chr(0x1F1E6 + ord(code[0]) - ord("A")) + chr(0x1F1E6 + ord(code[1]) - ord("A"))
+
+
+def _region_title(region: str, lang: str) -> str:
+    key = f"region_{region.lower().replace(' ', '_')}"
+    translated = t(lang, key)
+    return translated if translated != key else region
+
+
 def language_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.row(
@@ -25,13 +38,13 @@ def main_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def regions_keyboard(regions: list[str], page: int, lang: str, page_size: int = 3) -> InlineKeyboardMarkup:
+def regions_keyboard(regions: list[str], page: int, lang: str, page_size: int = 8) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     start = page * page_size
     chunk = regions[start : start + page_size]
 
     for idx, region in enumerate(chunk, start=start):
-        builder.row(InlineKeyboardButton(text=region, callback_data=f"region:{idx}"))
+        builder.row(InlineKeyboardButton(text=_region_title(region, lang), callback_data=f"region:{idx}"))
 
     if start + page_size < len(regions):
         builder.row(InlineKeyboardButton(text=t(lang, "more"), callback_data=f"region_page:{page + 1}"))
@@ -45,20 +58,32 @@ def countries_keyboard(
     region_idx: int,
     page: int,
     lang: str,
-    page_size: int = 3,
+    page_size: int = 20,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     start = page * page_size
     chunk = countries[start : start + page_size]
-
-    for country in chunk:
-        title = country["name_ru"] if lang == "ru" else country["name_en"]
-        builder.row(
-            InlineKeyboardButton(
-                text=f"{title}",
-                callback_data=f"country:{country['code']}",
-            )
+    for i in range(0, len(chunk), 2):
+        left = chunk[i]
+        left_title = left["name_ru"] if lang == "ru" else left["name_en"]
+        left_flag = _flag_emoji(left["code"])
+        left_btn = InlineKeyboardButton(
+            text=f"{left_flag} {left_title}".strip(),
+            callback_data=f"country:{left['code']}",
         )
+        right_btn = None
+        if i + 1 < len(chunk):
+            right = chunk[i + 1]
+            right_title = right["name_ru"] if lang == "ru" else right["name_en"]
+            right_flag = _flag_emoji(right["code"])
+            right_btn = InlineKeyboardButton(
+                text=f"{right_flag} {right_title}".strip(),
+                callback_data=f"country:{right['code']}",
+            )
+        if right_btn:
+            builder.row(left_btn, right_btn)
+        else:
+            builder.row(left_btn)
 
     if start + page_size < len(countries):
         builder.row(
@@ -78,7 +103,7 @@ def package_list_keyboard(
     sort_by: str,
     page: int,
     lang: str,
-    page_size: int = 2,
+    page_size: int = 4,
 ) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     start = page * page_size

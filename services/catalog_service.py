@@ -39,6 +39,81 @@ REGION_ALIASES = {
     "other": "Other",
 }
 
+RU_COUNTRY_NAMES: dict[str, str] = {
+    "AE": "ОАЭ",
+    "AL": "Албания",
+    "AR": "Аргентина",
+    "AT": "Австрия",
+    "AU": "Австралия",
+    "BE": "Бельгия",
+    "BG": "Болгария",
+    "BH": "Бахрейн",
+    "BR": "Бразилия",
+    "CA": "Канада",
+    "CH": "Швейцария",
+    "CL": "Чили",
+    "CN": "Китай",
+    "CO": "Колумбия",
+    "CY": "Кипр",
+    "CZ": "Чехия",
+    "DE": "Германия",
+    "DK": "Дания",
+    "EE": "Эстония",
+    "EG": "Египет",
+    "ES": "Испания",
+    "FI": "Финляндия",
+    "FR": "Франция",
+    "GB": "Великобритания",
+    "GR": "Греция",
+    "HK": "Гонконг",
+    "HR": "Хорватия",
+    "HU": "Венгрия",
+    "ID": "Индонезия",
+    "IE": "Ирландия",
+    "IL": "Израиль",
+    "IN": "Индия",
+    "IS": "Исландия",
+    "IT": "Италия",
+    "JO": "Иордания",
+    "JP": "Япония",
+    "KE": "Кения",
+    "KH": "Камбоджа",
+    "KR": "Южная Корея",
+    "KW": "Кувейт",
+    "LK": "Шри-Ланка",
+    "LT": "Литва",
+    "LU": "Люксембург",
+    "LV": "Латвия",
+    "MA": "Марокко",
+    "MT": "Мальта",
+    "MX": "Мексика",
+    "MY": "Малайзия",
+    "NG": "Нигерия",
+    "NL": "Нидерланды",
+    "NO": "Норвегия",
+    "NP": "Непал",
+    "NZ": "Новая Зеландия",
+    "OM": "Оман",
+    "PE": "Перу",
+    "PH": "Филиппины",
+    "PL": "Польша",
+    "PT": "Португалия",
+    "QA": "Катар",
+    "RO": "Румыния",
+    "SA": "Саудовская Аравия",
+    "SE": "Швеция",
+    "SG": "Сингапур",
+    "SI": "Словения",
+    "SK": "Словакия",
+    "TH": "Таиланд",
+    "TN": "Тунис",
+    "TR": "Турция",
+    "TW": "Тайвань",
+    "US": "США",
+    "VN": "Вьетнам",
+    "ZA": "ЮАР",
+}
+
 FALLBACK_COUNTRIES: list[dict[str, Any]] = [
     {"code": "AL", "name": "Albania", "region": "Europe"},
     {"code": "AT", "name": "Austria", "region": "Europe"},
@@ -133,6 +208,10 @@ class CatalogService:
         key = region_raw.strip().lower()
         return REGION_ALIASES.get(key, region_raw.strip().title())
 
+    @staticmethod
+    def _local_name_ru(name_en: str, code: str) -> str:
+        return RU_COUNTRY_NAMES.get(code.upper(), name_en)
+
     async def get_all_countries(self, use_cache: bool = True) -> list[dict[str, Any]]:
         cache_key = "__countries__"
         if use_cache:
@@ -152,7 +231,10 @@ class CatalogService:
             {
                 "code": c["code"],
                 "name_en": c.get("name") or c.get("name_en") or c["code"],
-                "name_ru": c.get("name") or c.get("name_ru") or c["code"],
+                "name_ru": self._local_name_ru(
+                    c.get("name") or c.get("name_en") or c["code"],
+                    c["code"],
+                ),
                 "region": self._normalize_region(c.get("region")),
                 "popularity_score": float(c.get("popularity_score") or 0),
             }
