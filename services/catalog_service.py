@@ -360,6 +360,10 @@ class CatalogService:
     def _fallback_name_map() -> dict[str, str]:
         return {item["code"].upper(): item["name"] for item in FALLBACK_COUNTRIES}
 
+    @staticmethod
+    def _fallback_name_to_region_map() -> dict[str, str]:
+        return {item["name"].strip().lower(): item["region"] for item in FALLBACK_COUNTRIES}
+
     async def get_all_countries(self, use_cache: bool = True) -> list[dict[str, Any]]:
         cache_key = "__countries__"
         if use_cache:
@@ -369,6 +373,7 @@ class CatalogService:
 
         fallback_regions = self._fallback_region_map()
         fallback_names = self._fallback_name_map()
+        fallback_name_to_region = self._fallback_name_to_region_map()
         country_map: dict[str, dict[str, Any]] = {}
 
         # 1) Try official countries endpoint first.
@@ -426,7 +431,12 @@ class CatalogService:
                 or COUNTRY_NAME_BY_CODE.get(code)
                 or code
             )
-            region = country_map.get(code, {}).get("region") or fallback_regions.get(code) or "Other"
+            region = (
+                country_map.get(code, {}).get("region")
+                or fallback_regions.get(code)
+                or fallback_name_to_region.get(str(name_en).strip().lower())
+                or "Other"
+            )
             popularity = max(
                 float(country_map.get(code, {}).get("popularity_score") or 0),
                 float(pkg.get("popularity_score") or 0),

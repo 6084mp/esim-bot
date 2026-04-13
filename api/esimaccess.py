@@ -186,13 +186,21 @@ class EsimAccessClient:
             raw.get("wholesalePrice"),
             raw.get("basePrice"),
             raw.get("salePrice"),
-            raw.get("amount"),
+            raw.get("packagePrice"),
             raw.get("cost"),
         ]
-        wholesale_raw = next((v for v in price_fields if v not in (None, "")), 0)
+        wholesale_raw = next((v for v in price_fields if v not in (None, "")), None)
+        if wholesale_raw is None:
+            # Last-resort fallback for partner payload variations.
+            wholesale_raw = raw.get("amount")
         wholesale = self._to_float(wholesale_raw)
-        # API frequently returns minor units (cents): 1220 -> $12.20
-        if wholesale >= 100 and self._is_int_like(wholesale_raw):
+        # Normalize extreme minor units: cents / milli-cents / etc.
+        if wholesale > 0 and self._is_int_like(wholesale_raw):
+            while wholesale > 500 and wholesale >= 100:
+                wholesale = wholesale / 100
+
+        # Additional guard for clearly malformed values.
+        if wholesale > 5000:
             wholesale = wholesale / 100
 
         days_raw = raw.get("validity") or raw.get("days") or raw.get("durationDays") or raw.get("duration")
@@ -384,7 +392,6 @@ class EsimAccessClient:
         # Primary endpoint from official Postman collection:
         # POST /api/v1/open/package/list
         post_attempts: list[dict[str, Any]] = [
-            {"type": 0, "pageNum": 1, "pageSize": 3000},
             {"type": 0, "pageNum": 1, "pageSize": 3000, "countryCode": code},
             {"type": 0, "pageNum": 1, "pageSize": 3000, "country": code},
         ]
@@ -418,8 +425,7 @@ class EsimAccessClient:
 
             filtered = [item for item in items if self._country_match(item, code, country_name)]
             if not filtered:
-                # Some providers may already pre-filter by country in backend response.
-                filtered = items
+                continue
             normalized = [self._normalize_package(item, code) for item in filtered]
             if normalized:
                 return normalized
