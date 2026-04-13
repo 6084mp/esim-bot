@@ -397,12 +397,48 @@ class EsimAccessClient:
         raise RuntimeError("Provider order endpoint is unavailable")
 
     async def get_order_detail(self, provider_order_no: str) -> dict[str, Any]:
-        response = await self._request("GET", f"/orders/{provider_order_no}")
-        data = response.get("data") or response.get("result") or response
-        return {
-            "status": str(data.get("status") or data.get("orderStatus") or "").lower(),
-            "qr_url": str(data.get("qrCodeUrl") or data.get("esimQrUrl") or ""),
-            "activation_code": str(data.get("activationCode") or data.get("iccid") or ""),
-            "instructions": str(data.get("activationManual") or data.get("instructions") or ""),
-            "raw": data,
-        }
+        attempts: list[tuple[str, str, dict[str, Any] | None]] = [
+            ("POST", "/esim/query", {"orderNo": provider_order_no}),
+            ("POST", "/esim/query", {"orderId": provider_order_no}),
+            ("POST", "/esim/query", {"id": provider_order_no}),
+            ("GET", f"/orders/{provider_order_no}", None),  # legacy fallback
+        ]
+        last_error: Exception | None = None
+        for method, path, body in attempts:
+            try:
+                if method == "POST":
+                    response = await self._request("POST", path, json=body or {})
+                else:
+                    response = await self._request("GET", path)
+                data = response.get("data") or response.get("result") or response
+                return {
+                    "status": str(
+                        data.get("status")
+                        or data.get("orderStatus")
+                        or data.get("esimStatus")
+                        or ""
+                    ).lower(),
+                    "qr_url": str(
+                        data.get("qrCodeUrl")
+                        or data.get("esimQrUrl")
+                        or data.get("qrUrl")
+                        or ""
+                    ),
+                    "activation_code": str(
+                        data.get("activationCode")
+                        or data.get("iccid")
+                        or data.get("smdpAddress")
+                        or ""
+                    ),
+                    "instructions": str(data.get("activationManual") or data.get("instructions") or ""),
+                    "raw": data,
+                }
+            except RuntimeError as exc:
+                last_error = exc
+                if "error 404" in str(exc).lower():
+                    continue
+                raise
+
+        if last_error:
+            raise last_error
+        raise RuntimeError("Provider order query endpoint is unavailable")
