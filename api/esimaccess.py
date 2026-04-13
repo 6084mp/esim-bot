@@ -253,23 +253,24 @@ class EsimAccessClient:
     async def get_packages(self, country_code: str) -> list[dict[str, Any]]:
         code = country_code.upper()
         country_name = COUNTRY_CODE_TO_NAME.get(code, "")
-
-        attempts: list[dict[str, str]] = [
+        # Primary endpoint from official Postman collection:
+        # POST /api/v1/open/package/list
+        post_attempts: list[dict[str, Any]] = [
+            {},
             {"countryCode": code},
             {"country": code},
         ]
         if country_name:
-            attempts.extend(
+            post_attempts.extend(
                 [
                     {"country": country_name},
                     {"countryName": country_name},
-                    {"region": country_name},
                 ]
             )
 
-        for params in attempts:
+        for body in post_attempts:
             try:
-                payload = await self._request("GET", "/packages", params=params)
+                payload = await self._request("POST", "/package/list", json=body)
             except RuntimeError as exc:
                 text = str(exc).lower()
                 if "error 400" in text or "error 404" in text:
@@ -277,15 +278,37 @@ class EsimAccessClient:
                 raise
 
             items = self._extract_items(payload)
-            normalized = [self._normalize_package(item, code) for item in items]
+            if not items:
+                continue
+
+            filtered = [item for item in items if self._country_match(item, code, country_name)]
+            if not filtered:
+                # Some providers may already pre-filter by country in backend response.
+                filtered = items
+            normalized = [self._normalize_package(item, code) for item in filtered]
             if normalized:
                 return normalized
 
-        # Fallback: try unfiltered list and filter manually by country fields.
-        payload = await self._request("GET", "/packages")
-        items = self._extract_items(payload)
-        filtered = [item for item in items if self._country_match(item, code, country_name)]
-        return [self._normalize_package(item, code) for item in filtered]
+        # Backward-compatible fallback for legacy endpoint variants.
+        legacy_paths = [
+            ("GET", "/packages"),
+            ("GET", "/packages/list"),
+        ]
+        for method, path in legacy_paths:
+            try:
+                payload = await self._request(method, path)
+            except RuntimeError as exc:
+                text = str(exc).lower()
+                if "error 400" in text or "error 404" in text:
+                    continue
+                raise
+            items = self._extract_items(payload)
+            filtered = [item for item in items if self._country_match(item, code, country_name)]
+            normalized = [self._normalize_package(item, code) for item in filtered]
+            if normalized:
+                return normalized
+
+        return []
 
     async def purchase_esim(self, package_code: str, external_id: str) -> dict[str, Any]:
         payload = {
