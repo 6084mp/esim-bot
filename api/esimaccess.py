@@ -233,17 +233,68 @@ class EsimAccessClient:
         return False
 
     async def get_countries(self, search: str | None = None) -> list[dict[str, Any]]:
-        payload = await self._request("GET", "/countries")
-        data = payload.get("data") or payload.get("result") or []
-        countries = [
-            {
-                "code": str(item.get("code") or item.get("countryCode") or "").upper(),
-                "name": str(item.get("name") or item.get("countryName") or ""),
-                "region": str(item.get("region") or item.get("continent") or item.get("zone") or "Other"),
-                "popularity_score": self._to_float(item.get("soldCount") or item.get("orderCount") or item.get("popularity")),
-            }
-            for item in data
+        # Primary endpoint from official Postman collection:
+        # POST /api/v1/open/location/list
+        countries: list[dict[str, Any]] = []
+        attempts: list[tuple[str, str, dict[str, Any] | None]] = [
+            ("POST", "/location/list", {}),
+            ("GET", "/countries", None),  # backward-compatible fallback
         ]
+
+        for method, path, body in attempts:
+            try:
+                if method == "POST":
+                    payload = await self._request("POST", path, json=body or {})
+                else:
+                    payload = await self._request("GET", path)
+            except RuntimeError as exc:
+                if "error 404" in str(exc).lower():
+                    continue
+                raise
+
+            data = self._extract_items(payload)
+            if not data:
+                # Some responses keep list in payload["data"] directly (already handled by _extract_items),
+                # but keep this compatibility branch for unexpected shapes.
+                raw_data = payload.get("data") or payload.get("result") or []
+                if isinstance(raw_data, list):
+                    data = [item for item in raw_data if isinstance(item, dict)]
+
+            if not data:
+                continue
+
+            countries = [
+                {
+                    "code": str(
+                        item.get("code")
+                        or item.get("countryCode")
+                        or item.get("iso2")
+                        or item.get("locationCode")
+                        or ""
+                    ).upper(),
+                    "name": str(
+                        item.get("name")
+                        or item.get("countryName")
+                        or item.get("locationName")
+                        or item.get("enName")
+                        or ""
+                    ),
+                    "region": str(
+                        item.get("region")
+                        or item.get("continent")
+                        or item.get("zone")
+                        or item.get("groupName")
+                        or "Other"
+                    ),
+                    "popularity_score": self._to_float(
+                        item.get("soldCount") or item.get("orderCount") or item.get("popularity")
+                    ),
+                }
+                for item in data
+            ]
+            if countries:
+                break
+
         countries = [c for c in countries if c["code"]]
         if search:
             q = search.strip().lower()
