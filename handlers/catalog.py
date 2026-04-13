@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -13,8 +13,8 @@ from keyboards.main_menu import (
     countries_keyboard,
     main_menu_keyboard,
     package_detail_keyboard,
-    packages_keyboard,
-    search_results_keyboard,
+    package_list_keyboard,
+    regions_keyboard,
 )
 from services.catalog_service import CatalogService
 from utils.i18n import t
@@ -23,59 +23,161 @@ from utils.i18n import t
 router = Router()
 
 
-class CatalogStates(StatesGroup):
-    waiting_country_query = State()
+async def _safe_edit_or_send(
+    callback: CallbackQuery,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | None = None,
+) -> None:
+    try:
+        await callback.message.edit_text(text, reply_markup=reply_markup)
+    except TelegramBadRequest:
+        await callback.message.answer(text, reply_markup=reply_markup)
+
+
+def _safe_page(total_items: int, page_size: int, requested_page: int) -> int:
+    if total_items <= 0:
+        return 0
+    max_page = (total_items - 1) // page_size
+    return max(0, min(requested_page, max_page))
 
 
 @router.callback_query(F.data == "menu:buy")
-async def buy_esim(callback: CallbackQuery, session_factory: async_sessionmaker, catalog_service: CatalogService) -> None:
-    lang = await get_user_language(session_factory, callback.from_user.id)
-    countries = await catalog_service.get_popular_countries()
-    await callback.message.edit_text(
-        t(lang, "pick_country"),
-        reply_markup=countries_keyboard(countries, lang),
-    )
-    await callback.answer()
-
-
-@router.callback_query(F.data == "country:search")
-async def ask_country_search(callback: CallbackQuery, state: FSMContext, session_factory: async_sessionmaker) -> None:
-    lang = await get_user_language(session_factory, callback.from_user.id)
-    await state.set_state(CatalogStates.waiting_country_query)
-    await callback.message.edit_text(t(lang, "send_country_query"))
-    await callback.answer()
-
-
-@router.message(CatalogStates.waiting_country_query)
-async def country_search(
-    message: Message,
-    state: FSMContext,
+async def buy_esim(
+    callback: CallbackQuery,
     session_factory: async_sessionmaker,
     catalog_service: CatalogService,
+    state: FSMContext,
 ) -> None:
-    lang = await get_user_language(session_factory, message.from_user.id)
-    query = (message.text or "").strip()
-    if not query:
-        await message.answer(t(lang, "send_country_query"))
+    lang = await get_user_language(session_factory, callback.from_user.id)
+    try:
+        regions = await catalog_service.get_regions()
+    except Exception:
+        await _safe_edit_or_send(callback, t(lang, "country_error"), reply_markup=main_menu_keyboard(lang))
+        await callback.answer()
         return
 
-    try:
-        countries = await catalog_service.search_countries(query)
-    except Exception:
-        await message.answer(t(lang, "country_error"), reply_markup=main_menu_keyboard(lang))
-        await state.clear()
+    if not regions:
+        await _safe_edit_or_send(callback, t(lang, "no_regions"), reply_markup=main_menu_keyboard(lang))
+        await callback.answer()
         return
+
+    await state.update_data(regions=regions)
+    await _safe_edit_or_send(
+        callback,
+        t(lang, "choose_region"),
+        reply_markup=regions_keyboard(regions, page=0, lang=lang),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("region_page:"))
+async def region_page(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker,
+    catalog_service: CatalogService,
+    state: FSMContext,
+) -> None:
+    lang = await get_user_language(session_factory, callback.from_user.id)
+    requested_page = int(callback.data.split(":", 1)[1])
+
+    data = await state.get_data()
+    regions = data.get("regions") or await catalog_service.get_regions()
+    if not regions:
+        await _safe_edit_or_send(callback, t(lang, "no_regions"), reply_markup=main_menu_keyboard(lang))
+        await callback.answer()
+        return
+
+    page = _safe_page(len(regions), 3, requested_page)
+    await state.update_data(regions=regions)
+    await _safe_edit_or_send(
+        callback,
+        t(lang, "choose_region"),
+        reply_markup=regions_keyboard(regions, page=page, lang=lang),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("region:"))
+async def region_pick(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker,
+    catalog_service: CatalogService,
+    state: FSMContext,
+) -> None:
+    lang = await get_user_language(session_factory, callback.from_user.id)
+    region_idx = int(callback.data.split(":", 1)[1])
+
+    data = await state.get_data()
+    regions = data.get("regions") or await catalog_service.get_regions()
+
+    if region_idx < 0 or region_idx >= len(regions):
+        await callback.answer()
+        return
+
+    region_name = regions[region_idx]
+    countries = await catalog_service.get_countries_by_region(region_name)
+    if not countries:
+        await _safe_edit_or_send(callback, t(lang, "no_country_found"), reply_markup=main_menu_keyboard(lang))
+        await callback.answer()
+        return
+
+    countries_map = data.get("countries_by_region") or {}
+    countries_map[str(region_idx)] = countries
+    await state.update_data(
+        regions=regions,
+        selected_region_idx=region_idx,
+        selected_region=region_name,
+        countries_by_region=countries_map,
+    )
+
+    await _safe_edit_or_send(
+        callback,
+        t(lang, "choose_country", region=region_name),
+        reply_markup=countries_keyboard(countries, region_idx=region_idx, page=0, lang=lang),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("countries_page:"))
+async def countries_page(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker,
+    catalog_service: CatalogService,
+    state: FSMContext,
+) -> None:
+    _, region_idx_raw, page_raw = callback.data.split(":", 2)
+    region_idx = int(region_idx_raw)
+    requested_page = int(page_raw)
+
+    lang = await get_user_language(session_factory, callback.from_user.id)
+    data = await state.get_data()
+
+    countries_map = data.get("countries_by_region") or {}
+    countries = countries_map.get(str(region_idx))
+    regions = data.get("regions") or await catalog_service.get_regions()
+
+    if countries is None:
+        if region_idx < 0 or region_idx >= len(regions):
+            await callback.answer()
+            return
+        countries = await catalog_service.get_countries_by_region(regions[region_idx])
+        countries_map[str(region_idx)] = countries
+        await state.update_data(countries_by_region=countries_map)
 
     if not countries:
-        await message.answer(t(lang, "no_country_found"), reply_markup=main_menu_keyboard(lang))
-        await state.clear()
+        await _safe_edit_or_send(callback, t(lang, "no_country_found"), reply_markup=main_menu_keyboard(lang))
+        await callback.answer()
         return
 
-    await message.answer(
-        t(lang, "pick_country"),
-        reply_markup=search_results_keyboard(countries, lang),
+    page = _safe_page(len(countries), 3, requested_page)
+    region_name = regions[region_idx] if region_idx < len(regions) else ""
+
+    await _safe_edit_or_send(
+        callback,
+        t(lang, "choose_country", region=region_name),
+        reply_markup=countries_keyboard(countries, region_idx=region_idx, page=page, lang=lang),
     )
-    await state.clear()
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("country:"))
@@ -86,46 +188,140 @@ async def show_country_packages(
     state: FSMContext,
 ) -> None:
     _, country_code = callback.data.split(":", 1)
-    if country_code == "search":
-        return
-
     lang = await get_user_language(session_factory, callback.from_user.id)
 
+    sort_by = "value"
     try:
         packages = await catalog_service.get_country_packages(country_code=country_code, use_cache=True)
     except Exception:
-        await callback.message.edit_text(t(lang, "country_error"), reply_markup=main_menu_keyboard(lang))
+        await _safe_edit_or_send(callback, t(lang, "country_error"), reply_markup=main_menu_keyboard(lang))
         await callback.answer()
         return
 
-    offers = catalog_service.select_top_three(packages)
-    if not offers:
-        await callback.message.edit_text(t(lang, "no_packages"), reply_markup=main_menu_keyboard(lang))
+    if not packages:
+        await _safe_edit_or_send(callback, t(lang, "no_packages"), reply_markup=main_menu_keyboard(lang))
         await callback.answer()
         return
 
-    lines: list[str] = [t(lang, "packages_title", country=country_code.upper())]
-    for offer in offers:
-        offer_label_key = {
-            "best": "offer_best",
-            "cheap": "offer_cheap",
-            "max": "offer_max",
-            "extra": "offer_extra",
-        }.get(offer["offer_type"], "offer_extra")
-        lines.append(
-            t(
-                lang,
-                "plan_line",
-                label=t(lang, offer_label_key),
-                data=offer["data_gb"],
-                days=offer["days"],
-                usd=offer["retail_price"],
-                stars=offer["stars_amount"],
-            )
-        )
+    sorted_packages = catalog_service.sort_packages(packages, sort_by=sort_by)
+    state_data = await state.get_data()
+    country_packages = state_data.get("country_packages") or {}
+    country_packages[country_code.upper()] = packages
 
-    await state.update_data(country_packages={country_code.upper(): packages})
-    await callback.message.edit_text("\n".join(lines), reply_markup=packages_keyboard(offers, lang))
+    await state.update_data(
+        country_packages=country_packages,
+        package_sort_by=sort_by,
+        package_page=0,
+        current_country=country_code.upper(),
+    )
+
+    await _safe_edit_or_send(
+        callback,
+        t(lang, "packages_full_title", country=country_code.upper(), sort=t(lang, "sort_mode_value")),
+        reply_markup=package_list_keyboard(
+            sorted_packages,
+            country_code=country_code.upper(),
+            sort_by=sort_by,
+            page=0,
+            lang=lang,
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pkgpage:"))
+async def package_page(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker,
+    catalog_service: CatalogService,
+    state: FSMContext,
+) -> None:
+    _, country_code, sort_by, requested_page_raw = callback.data.split(":", 3)
+    requested_page = int(requested_page_raw)
+    lang = await get_user_language(session_factory, callback.from_user.id)
+
+    data = await state.get_data()
+    country_packages = data.get("country_packages") or {}
+    packages = country_packages.get(country_code.upper())
+
+    if packages is None:
+        packages = await catalog_service.get_country_packages(country_code=country_code, use_cache=True)
+        country_packages[country_code.upper()] = packages
+
+    if not packages:
+        await _safe_edit_or_send(callback, t(lang, "no_packages"), reply_markup=main_menu_keyboard(lang))
+        await callback.answer()
+        return
+
+    sorted_packages = catalog_service.sort_packages(packages, sort_by=sort_by)
+    page = _safe_page(len(sorted_packages), 2, requested_page)
+
+    await state.update_data(
+        country_packages=country_packages,
+        package_sort_by=sort_by,
+        package_page=page,
+        current_country=country_code.upper(),
+    )
+
+    mode_key = "sort_mode_popular" if sort_by == "popular" else "sort_mode_value"
+    await _safe_edit_or_send(
+        callback,
+        t(lang, "packages_full_title", country=country_code.upper(), sort=t(lang, mode_key)),
+        reply_markup=package_list_keyboard(
+            sorted_packages,
+            country_code=country_code.upper(),
+            sort_by=sort_by,
+            page=page,
+            lang=lang,
+        ),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("pkgsort:"))
+async def package_sort(
+    callback: CallbackQuery,
+    session_factory: async_sessionmaker,
+    catalog_service: CatalogService,
+    state: FSMContext,
+) -> None:
+    _, country_code, sort_by = callback.data.split(":", 2)
+    lang = await get_user_language(session_factory, callback.from_user.id)
+
+    data = await state.get_data()
+    country_packages = data.get("country_packages") or {}
+    packages = country_packages.get(country_code.upper())
+
+    if packages is None:
+        packages = await catalog_service.get_country_packages(country_code=country_code, use_cache=True)
+        country_packages[country_code.upper()] = packages
+
+    if not packages:
+        await _safe_edit_or_send(callback, t(lang, "no_packages"), reply_markup=main_menu_keyboard(lang))
+        await callback.answer()
+        return
+
+    sorted_packages = catalog_service.sort_packages(packages, sort_by=sort_by)
+    mode_key = "sort_mode_popular" if sort_by == "popular" else "sort_mode_value"
+
+    await state.update_data(
+        country_packages=country_packages,
+        package_sort_by=sort_by,
+        package_page=0,
+        current_country=country_code.upper(),
+    )
+
+    await _safe_edit_or_send(
+        callback,
+        t(lang, "packages_full_title", country=country_code.upper(), sort=t(lang, mode_key)),
+        reply_markup=package_list_keyboard(
+            sorted_packages,
+            country_code=country_code.upper(),
+            sort_by=sort_by,
+            page=0,
+            lang=lang,
+        ),
+    )
     await callback.answer()
 
 
@@ -140,7 +336,7 @@ async def show_package_detail(
     lang = await get_user_language(session_factory, callback.from_user.id)
 
     data = await state.get_data()
-    country_packages = data.get("country_packages", {})
+    country_packages = data.get("country_packages") or {}
     packages = country_packages.get(country_code.upper()) or []
 
     package = catalog_service.find_by_code(packages, package_code)
@@ -149,7 +345,7 @@ async def show_package_detail(
         package = catalog_service.find_by_code(packages, package_code)
 
     if not package:
-        await callback.message.edit_text(t(lang, "no_packages"), reply_markup=main_menu_keyboard(lang))
+        await _safe_edit_or_send(callback, t(lang, "no_packages"), reply_markup=main_menu_keyboard(lang))
         await callback.answer()
         return
 
@@ -164,9 +360,10 @@ async def show_package_detail(
         usd=package["retail_price"],
         stars=package["stars_amount"],
     )
-    await callback.message.edit_text(
+    await _safe_edit_or_send(
+        callback,
         text,
-        reply_markup=package_detail_keyboard(country_code, package_code, lang),
+        reply_markup=package_detail_keyboard(country_code.upper(), package_code, lang),
     )
     await callback.answer()
 
@@ -185,7 +382,7 @@ async def my_orders(callback: CallbackQuery, session_factory: async_sessionmaker
         ).all()
 
     if not rows:
-        await callback.message.edit_text(t(lang, "orders_empty"), reply_markup=main_menu_keyboard(lang))
+        await _safe_edit_or_send(callback, t(lang, "orders_empty"), reply_markup=main_menu_keyboard(lang))
         await callback.answer()
         return
 
@@ -202,7 +399,7 @@ async def my_orders(callback: CallbackQuery, session_factory: async_sessionmaker
             )
         )
 
-    await callback.message.edit_text("\n".join(lines), reply_markup=main_menu_keyboard(lang))
+    await _safe_edit_or_send(callback, "\n".join(lines), reply_markup=main_menu_keyboard(lang))
     await callback.answer()
 
 

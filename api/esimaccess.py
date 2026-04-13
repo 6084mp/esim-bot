@@ -77,6 +77,7 @@ class EsimAccessClient:
             "data_gb": round(data_gb, 2),
             "days": self._to_int(raw.get("validity") or raw.get("days") or raw.get("durationDays"), default=1),
             "wholesale_price": wholesale,
+            "popularity_score": self._to_float(raw.get("soldCount") or raw.get("orderCount") or raw.get("popularity")),
             "raw": raw,
         }
 
@@ -87,6 +88,8 @@ class EsimAccessClient:
             {
                 "code": str(item.get("code") or item.get("countryCode") or "").upper(),
                 "name": str(item.get("name") or item.get("countryName") or ""),
+                "region": str(item.get("region") or item.get("continent") or item.get("zone") or "Other"),
+                "popularity_score": self._to_float(item.get("soldCount") or item.get("orderCount") or item.get("popularity")),
             }
             for item in data
         ]

@@ -25,47 +25,91 @@ def main_menu_keyboard(lang: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def countries_keyboard(countries: list[dict[str, str]], lang: str) -> InlineKeyboardMarkup:
+def regions_keyboard(regions: list[str], page: int, lang: str, page_size: int = 3) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for country in countries[:3]:
-        title = country["name_ru"] if lang == "ru" else country["name_en"]
-        builder.row(
-            InlineKeyboardButton(
-                text=f"{country['emoji']} {title}",
-                callback_data=f"country:{country['code']}",
-            )
-        )
-    builder.row(InlineKeyboardButton(text=t(lang, "search_country"), callback_data="country:search"))
+    start = page * page_size
+    chunk = regions[start : start + page_size]
+
+    for idx, region in enumerate(chunk, start=start):
+        builder.row(InlineKeyboardButton(text=region, callback_data=f"region:{idx}"))
+
+    if start + page_size < len(regions):
+        builder.row(InlineKeyboardButton(text=t(lang, "more"), callback_data=f"region_page:{page + 1}"))
+
     builder.row(InlineKeyboardButton(text=t(lang, "back"), callback_data="menu:back"))
     return builder.as_markup()
 
 
-def search_results_keyboard(countries: list[dict[str, str]], lang: str) -> InlineKeyboardMarkup:
+def countries_keyboard(
+    countries: list[dict[str, str]],
+    region_idx: int,
+    page: int,
+    lang: str,
+    page_size: int = 3,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for country in countries[:4]:
+    start = page * page_size
+    chunk = countries[start : start + page_size]
+
+    for country in chunk:
         title = country["name_ru"] if lang == "ru" else country["name_en"]
         builder.row(
             InlineKeyboardButton(
-                text=f"{country['emoji']} {title}",
+                text=f"{title}",
                 callback_data=f"country:{country['code']}",
             )
         )
+
+    if start + page_size < len(countries):
+        builder.row(
+            InlineKeyboardButton(
+                text=t(lang, "more"),
+                callback_data=f"countries_page:{region_idx}:{page + 1}",
+            )
+        )
+
     builder.row(InlineKeyboardButton(text=t(lang, "back"), callback_data="menu:buy"))
     return builder.as_markup()
 
 
-def packages_keyboard(offers: list[dict], lang: str) -> InlineKeyboardMarkup:
+def package_list_keyboard(
+    packages: list[dict],
+    country_code: str,
+    sort_by: str,
+    page: int,
+    lang: str,
+    page_size: int = 2,
+) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    offer_map = {
-        "best": t(lang, "offer_best"),
-        "cheap": t(lang, "offer_cheap"),
-        "max": t(lang, "offer_max"),
-        "extra": t(lang, "offer_extra"),
-    }
-    for offer in offers[:3]:
-        label = offer_map.get(offer["offer_type"], t(lang, "offer_extra"))
-        text = f"{label} • {offer['data_gb']}GB • {offer['stars_amount']}⭐"
-        builder.row(InlineKeyboardButton(text=text, callback_data=f"package:{offer['country']}:{offer['code']}"))
+    start = page * page_size
+    chunk = packages[start : start + page_size]
+
+    for package in chunk:
+        text = f"{package['data_gb']}GB • {package['days']}d • {package['stars_amount']}⭐"
+        builder.row(InlineKeyboardButton(text=text, callback_data=f"package:{country_code}:{package['code']}"))
+
+    if sort_by == "value":
+        builder.row(
+            InlineKeyboardButton(
+                text=t(lang, "sort_popular"),
+                callback_data=f"pkgsort:{country_code}:popular",
+            )
+        )
+    else:
+        builder.row(
+            InlineKeyboardButton(
+                text=t(lang, "sort_value"),
+                callback_data=f"pkgsort:{country_code}:value",
+            )
+        )
+
+    if start + page_size < len(packages):
+        builder.row(
+            InlineKeyboardButton(
+                text=t(lang, "more"),
+                callback_data=f"pkgpage:{country_code}:{sort_by}:{page + 1}",
+            )
+        )
 
     builder.row(InlineKeyboardButton(text=t(lang, "back"), callback_data="menu:buy"))
     return builder.as_markup()
