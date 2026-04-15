@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
 
@@ -10,6 +12,7 @@ from keyboards.tariff import tariffs_keyboard
 from utils.formatters import format_data_gb
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 BUY_TEXTS = {"Buy eSIM", "Купить eSIM"}
 
@@ -101,12 +104,12 @@ async def _show_tariffs(callback: CallbackQuery, country_code: str, continent_ke
 
     country = catalog.get_country_by_code(country_code)
     if not country:
-        await callback.answer(localization.t(lang, "no_tariffs"), show_alert=True)
+        await callback.message.answer(localization.t(lang, "no_tariffs"))
         return
 
     tariffs = await catalog.get_tariffs(country_code)
     if not tariffs:
-        await callback.answer(localization.t(lang, "no_tariffs"), show_alert=True)
+        await callback.message.answer(localization.t(lang, "no_tariffs"))
         return
 
     page_items, current_page, total_pages = catalog.paginate_tariffs(tariffs, page=page, page_size=8)
@@ -130,12 +133,26 @@ async def _show_tariffs(callback: CallbackQuery, country_code: str, continent_ke
 @router.callback_query(F.data.startswith("country:"))
 async def country_selected(callback: CallbackQuery) -> None:
     _, country_code, continent_key, _page = callback.data.split(":", 3)
-    await _show_tariffs(callback, country_code=country_code, continent_key=continent_key, page=1)
     await callback.answer()
+    try:
+        await _show_tariffs(callback, country_code=country_code, continent_key=continent_key, page=1)
+    except Exception:
+        logger.exception("Failed to show tariffs for country=%s continent=%s", country_code, continent_key)
+        services = get_services()
+        localization = services["localization"]
+        lang = await _lang(callback)
+        await callback.message.answer(localization.t(lang, "unknown_error"))
 
 
 @router.callback_query(F.data.startswith("tariff_page:"))
 async def tariff_page(callback: CallbackQuery) -> None:
     _, country_code, continent_key, page_s = callback.data.split(":", 3)
-    await _show_tariffs(callback, country_code=country_code, continent_key=continent_key, page=int(page_s))
     await callback.answer()
+    try:
+        await _show_tariffs(callback, country_code=country_code, continent_key=continent_key, page=int(page_s))
+    except Exception:
+        logger.exception("Failed to show tariff page for country=%s continent=%s page=%s", country_code, continent_key, page_s)
+        services = get_services()
+        localization = services["localization"]
+        lang = await _lang(callback)
+        await callback.message.answer(localization.t(lang, "unknown_error"))
