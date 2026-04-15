@@ -10,7 +10,7 @@ from services.runtime_context import get_services
 
 from keyboards.catalog import continents_keyboard, countries_keyboard
 from keyboards.tariff import tariffs_keyboard
-from utils.formatters import format_data_gb
+from utils.formatters import format_data_gb, format_usd
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ def _tariff_btn(localization, lang: str, tariff: dict) -> str:
         gb=format_data_gb(tariff["data_amount_gb"]),
         days=tariff["validity_days"],
         stars=tariff["retail_price_stars"],
+        usd=format_usd(tariff["retail_price_usd"]),
     )
 
 

@@ -18,7 +18,7 @@ TEXTS = {
     "tariffs_title": "Тарифы для {country}\nСортировка: самые выгодные\n🔥 Самый выгодный — первый",
     "no_countries": "Нет доступных стран.",
     "no_tariffs": "Сейчас нет активных тарифов для этой страны.",
-    "tariff_btn": "📶 {gb} ГБ • {days} дней • {stars} ⭐",
+    "tariff_btn": "📶 {gb} ГБ • {days} дней • {stars} ⭐ (~${usd})",
     "tariff_detail": (
         "{flag} {country}\n"
         "📶 Объем: {gb} ГБ\n"

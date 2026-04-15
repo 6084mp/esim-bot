@@ -100,8 +100,9 @@ class SupplierAPIClient:
         price = SupplierAPIClient._to_float(value, 0.0)
         if price <= 0:
             return 0.0
-        # Some suppliers return prices in cents.
-        if price > 500:
+        # Supplier payloads may return price in cents or even in 1/100 of cents.
+        # Normalize progressively until we get a realistic USD value.
+        while price > 500:
             price = price / 100.0
         return round(price, 4)
 
