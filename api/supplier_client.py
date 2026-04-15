@@ -105,14 +105,24 @@ class SupplierAPIClient:
         # 470 -> $4.70, 30 -> $0.30, 1220 -> $12.20.
         # If source value has no decimal separator, treat it as cents first.
         is_integer_like = False
+        has_only_zero_fraction = False
         if isinstance(value, int):
             is_integer_like = True
         elif isinstance(value, str):
             raw = value.strip()
             if raw and "." not in raw and "," not in raw:
                 is_integer_like = True
+            if "." in raw:
+                frac = raw.split(".", 1)[1]
+                has_only_zero_fraction = frac.strip("0") == ""
+            elif "," in raw:
+                frac = raw.split(",", 1)[1]
+                has_only_zero_fraction = frac.strip("0") == ""
 
         if is_integer_like:
+            price = price / 100.0
+        elif has_only_zero_fraction and price >= 100:
+            # Example: "380.00" often means 380 cents -> $3.80 in supplier payloads.
             price = price / 100.0
 
         # Extra guard: some responses may still be scaled by 100 more.
