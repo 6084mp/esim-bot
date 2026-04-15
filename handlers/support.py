@@ -1,20 +1,35 @@
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery
-from sqlalchemy.ext.asyncio import async_sessionmaker
-
-from handlers.start import get_user_language
-from keyboards.main_menu import main_menu_keyboard
-from utils.i18n import t
-
+from aiogram.types import CallbackQuery, Message
 
 router = Router()
 
+SUPPORT_TEXTS = {"Support", "Поддержка"}
 
-@router.callback_query(F.data == "menu:support")
-async def support_menu(callback: CallbackQuery, session_factory: async_sessionmaker) -> None:
-    lang = await get_user_language(session_factory, callback.from_user.id)
-    text = t(lang, "support_text")
-    await callback.message.edit_text(text, reply_markup=main_menu_keyboard(lang))
+
+async def _lang(obj) -> str:
+    services = obj.bot["services"]
+    order_service = services["order_service"]
+    settings = services["settings"]
+    return await order_service.get_user_language(obj.from_user.id, settings.default_language)
+
+
+async def _show_support(target, lang: str) -> None:
+    services = target.bot["services"]
+    localization = services["localization"]
+    settings = services["settings"]
+    await target.answer(localization.t(lang, "support_text", username=settings.support_username))
+
+
+@router.message(F.text.in_(SUPPORT_TEXTS))
+async def support_message(message: Message) -> None:
+    lang = await _lang(message)
+    await _show_support(message, lang)
+
+
+@router.callback_query(F.data == "support:open")
+async def support_callback(callback: CallbackQuery) -> None:
+    lang = await _lang(callback)
+    await _show_support(callback.message, lang)
     await callback.answer()

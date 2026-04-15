@@ -1,38 +1,56 @@
 from __future__ import annotations
 
-from datetime import datetime
+import datetime as dt
 
-from sqlalchemy import DateTime, Float, Integer, String, func
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import DateTime, Float, Index, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
-
-class Base(DeclarativeBase):
-    pass
+from .db import Base
 
 
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    telegram_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
-    language: Mapped[str] = mapped_column(String(2), default="en")
-    username: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_id: Mapped[int] = mapped_column(Integer, unique=True, index=True, nullable=False)
+    username: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    language: Mapped[str] = mapped_column(String(2), nullable=False, default="en")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=False), default=dt.datetime.utcnow, nullable=False)
 
 
 class Order(Base):
     __tablename__ = "orders"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    telegram_id: Mapped[int] = mapped_column(Integer, index=True)
-    package_code: Mapped[str] = mapped_column(String(128))
-    country: Mapped[str] = mapped_column(String(8))
-    data_amount: Mapped[float] = mapped_column(Float)
-    days: Mapped[int] = mapped_column(Integer)
-    wholesale_price: Mapped[float] = mapped_column(Float)
-    retail_price: Mapped[float] = mapped_column(Float)
-    stars_amount: Mapped[int] = mapped_column(Integer)
-    payment_status: Mapped[str] = mapped_column(String(32), default="pending")
-    esim_qr_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    activation_code: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    order_ref: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    telegram_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    supplier_order_no: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+    package_code: Mapped[str] = mapped_column(String(128), nullable=False)
+    country_code: Mapped[str] = mapped_column(String(8), nullable=False)
+    country_name: Mapped[str] = mapped_column(String(128), nullable=False)
+
+    data_amount_gb: Mapped[float] = mapped_column(Float, nullable=False)
+    validity_days: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    wholesale_price_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    retail_price_usd: Mapped[float] = mapped_column(Float, nullable=False)
+    retail_price_stars: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    payment_system: Mapped[str] = mapped_column(String(32), nullable=False)
+    payment_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    fulfillment_status: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    esim_iccid: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    esim_qr_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    esim_smdp: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    esim_activation_code: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=False), default=dt.datetime.utcnow, nullable=False)
+    paid_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    delivered_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+Index("ix_orders_telegram_created", Order.telegram_id, Order.created_at.desc())

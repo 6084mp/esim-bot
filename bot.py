@@ -3,57 +3,82 @@ from __future__ import annotations
 import asyncio
 import logging
 
-import aiohttp
 from aiogram import Bot, Dispatcher
 
-from api.esimaccess import EsimAccessClient
-from config import get_settings
-from database.db import SessionLocal, init_db
-from handlers import catalog, delivery, faq, payment, start, support
-from services.cache_service import InMemoryTTLCache
+from api.supplier_client import SupplierAPIClient
+from config import Settings, get_settings
+from database.db import build_engine, create_db, get_session_factory
+from handlers import register_handlers
+from services.cache_service import CacheService
 from services.catalog_service import CatalogService
+from services.compatibility_service import CompatibilityService
+from services.delivery_service import DeliveryService
+from services.localization_service import LocalizationService
+from services.order_service import OrderService
 from services.pricing_service import PricingService
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+
+
+def build_services(settings: Settings) -> dict:
+    engine = build_engine(settings.database_url)
+    session_factory = get_session_factory(engine)
+
+    localization = LocalizationService(default_language=settings.default_language)
+    pricing = PricingService(stars_usd_rate=settings.stars_usd_rate)
+    cache = CacheService()
+
+    supplier = SupplierAPIClient(
+        base_url=settings.supplier_base_url,
+        access_code=settings.supplier_access_code,
+        secret_key=settings.supplier_secret_key,
+    )
+
+    order_service = OrderService(session_factory=session_factory)
+    catalog_service = CatalogService(
+        supplier_client=supplier,
+        cache=cache,
+        pricing=pricing,
+        cache_ttl_seconds=settings.cache_ttl_seconds,
+    )
+    compatibility_service = CompatibilityService()
+    delivery_service = DeliveryService(
+        supplier_client=supplier,
+        order_service=order_service,
+        localization=localization,
+        admin_chat_id=settings.admin_chat_id,
+    )
+
+    return {
+        "settings": settings,
+        "engine": engine,
+        "localization": localization,
+        "pricing": pricing,
+        "cache": cache,
+        "supplier_client": supplier,
+        "order_service": order_service,
+        "catalog_service": catalog_service,
+        "compatibility_service": compatibility_service,
+        "delivery_service": delivery_service,
+    }
 
 
 async def main() -> None:
-    logging.basicConfig(level=logging.INFO)
-
     settings = get_settings()
+    services = build_services(settings)
+
+    await create_db(services["engine"])
+
     bot = Bot(token=settings.bot_token)
+    bot["services"] = services
+
     dp = Dispatcher()
+    register_handlers(dp)
 
-    dp.include_router(start.router)
-    dp.include_router(catalog.router)
-    dp.include_router(payment.router)
-    dp.include_router(delivery.router)
-    dp.include_router(faq.router)
-    dp.include_router(support.router)
-
-    await init_db()
-
-    cache_service = InMemoryTTLCache(ttl_seconds=600)
-    pricing_service = PricingService(star_to_usd=settings.star_to_usd)
-
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as http_session:
-        async with EsimAccessClient(
-            access_code=settings.esim_access_code,
-            secret_key=settings.esim_secret_key,
-            session=http_session,
-        ) as api_client:
-            catalog_service = CatalogService(
-                api_client=api_client,
-                pricing_service=pricing_service,
-                cache_service=cache_service,
-            )
-            await dp.start_polling(
-                bot,
-                settings=settings,
-                session_factory=SessionLocal,
-                api_client=api_client,
-                pricing_service=pricing_service,
-                catalog_service=catalog_service,
-                cache_service=cache_service,
-            )
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":

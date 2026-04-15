@@ -1,25 +1,56 @@
 from __future__ import annotations
 
-from config import MID_COUNTRIES, TOP_COUNTRIES
-
 
 class PricingService:
-    def __init__(self, star_to_usd: float) -> None:
-        self.star_to_usd = star_to_usd
+    TOP_COUNTRIES = {"US", "GB", "DE", "FR", "IT", "ES", "TR", "TH", "JP", "AE"}
+    RARE_COUNTRIES = {
+        "AO", "BJ", "BF", "BI", "CM", "CF", "TD", "CD", "CG", "ER", "GA", "GM", "GN", "GW",
+        "LS", "LR", "MG", "MW", "ML", "MR", "MZ", "NE", "RW", "SL", "SO", "SS", "SD", "TG", "UG", "ZM",
+    }
 
-    def country_multiplier(self, country_code: str) -> float:
-        code = country_code.upper()
-        if code in TOP_COUNTRIES:
-            return 1.30
-        if code in MID_COUNTRIES:
-            return 1.40
-        return 1.55
+    MULTIPLIERS = {
+        "top": 1.30,
+        "mid": 1.40,
+        "rare": 1.55,
+        "global": 1.35,
+    }
 
-    def retail_price_usd(self, wholesale_price: float, country_code: str) -> float:
-        multiplier = self.country_multiplier(country_code)
-        retail = max(wholesale_price * multiplier, wholesale_price + 1)
+    def __init__(self, stars_usd_rate: float = 0.013) -> None:
+        self.stars_usd_rate = stars_usd_rate
+
+    def country_group(self, country_code: str) -> str:
+        code = (country_code or "").upper()
+        if code in {"GL", "GLOBAL"}:
+            return "global"
+        if code in self.TOP_COUNTRIES:
+            return "top"
+        if code in self.RARE_COUNTRIES:
+            return "rare"
+        return "mid"
+
+    def calculate_retail_usd(self, wholesale_usd: float, country_code: str) -> float:
+        group = self.country_group(country_code)
+        multiplier = self.MULTIPLIERS[group]
+        retail = max(wholesale_usd * multiplier, wholesale_usd + 1.0)
         return round(retail, 2)
 
-    def usd_to_stars(self, usd: float) -> int:
-        stars = round((usd / self.star_to_usd) / 10) * 10
-        return max(stars, 10)
+    def usd_to_stars(self, usd_amount: float) -> int:
+        raw_stars = usd_amount / self.stars_usd_rate
+        stars = round(raw_stars / 10) * 10
+        return max(1, int(stars))
+
+    @staticmethod
+    def duration_weight(validity_days: int) -> float:
+        if validity_days >= 30:
+            return 1.0
+        if validity_days >= 15:
+            return 0.95
+        if validity_days >= 7:
+            return 0.90
+        return 0.80
+
+    def calculate_value_score(self, data_gb: float, retail_price_usd: float, validity_days: int) -> float:
+        if retail_price_usd <= 0:
+            return 0.0
+        weight = self.duration_weight(validity_days)
+        return (data_gb / retail_price_usd) * weight

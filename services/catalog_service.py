@@ -1,579 +1,229 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
-from api.esimaccess import EsimAccessClient
-from services.cache_service import InMemoryTTLCache
+from api.supplier_client import SupplierAPIClient
+from services.cache_service import CacheService
 from services.pricing_service import PricingService
+from utils.flags import country_flag
+from utils.pagination import paginate_items
 
-REGION_PRIORITY = [
-    "Europe",
-    "Asia",
-    "North America",
-    "South America",
-    "Africa",
-    "Middle East",
-    "Oceania",
-    "Global",
-    "Other",
-]
 
-REGION_ALIASES = {
-    "eu": "Europe",
-    "europe": "Europe",
-    "asia": "Asia",
-    "africa": "Africa",
-    "middleeast": "Middle East",
-    "middle east": "Middle East",
-    "mena": "Middle East",
-    "northamerica": "North America",
-    "north america": "North America",
-    "southamerica": "South America",
-    "south america": "South America",
-    "america": "North America",
-    "americas": "North America",
-    "oceania": "Oceania",
-    "australia": "Oceania",
-    "global": "Global",
-    "world": "Global",
-    "other": "Other",
-}
-
-RU_COUNTRY_NAMES: dict[str, str] = {
-    "AE": "ОАЭ",
-    "AL": "Албания",
-    "AR": "Аргентина",
-    "AT": "Австрия",
-    "AU": "Австралия",
-    "BE": "Бельгия",
-    "BG": "Болгария",
-    "BH": "Бахрейн",
-    "BR": "Бразилия",
-    "CA": "Канада",
-    "CH": "Швейцария",
-    "CL": "Чили",
-    "CN": "Китай",
-    "CO": "Колумбия",
-    "CY": "Кипр",
-    "CZ": "Чехия",
-    "DE": "Германия",
-    "DK": "Дания",
-    "EE": "Эстония",
-    "EG": "Египет",
-    "ES": "Испания",
-    "FI": "Финляндия",
-    "FR": "Франция",
-    "GB": "Великобритания",
-    "GR": "Греция",
-    "HK": "Гонконг",
-    "HR": "Хорватия",
-    "HU": "Венгрия",
-    "ID": "Индонезия",
-    "IE": "Ирландия",
-    "IL": "Израиль",
-    "IN": "Индия",
-    "IS": "Исландия",
-    "IT": "Италия",
-    "JO": "Иордания",
-    "JP": "Япония",
-    "KE": "Кения",
-    "KH": "Камбоджа",
-    "KR": "Южная Корея",
-    "KW": "Кувейт",
-    "LK": "Шри-Ланка",
-    "LT": "Литва",
-    "LU": "Люксембург",
-    "LV": "Латвия",
-    "MA": "Марокко",
-    "MT": "Мальта",
-    "MX": "Мексика",
-    "MY": "Малайзия",
-    "NG": "Нигерия",
-    "NL": "Нидерланды",
-    "NO": "Норвегия",
-    "NP": "Непал",
-    "NZ": "Новая Зеландия",
-    "OM": "Оман",
-    "PE": "Перу",
-    "PH": "Филиппины",
-    "PL": "Польша",
-    "PT": "Португалия",
-    "QA": "Катар",
-    "RO": "Румыния",
-    "SA": "Саудовская Аравия",
-    "SE": "Швеция",
-    "SG": "Сингапур",
-    "SI": "Словения",
-    "SK": "Словакия",
-    "TH": "Таиланд",
-    "TN": "Тунис",
-    "TR": "Турция",
-    "TW": "Тайвань",
-    "US": "США",
-    "VN": "Вьетнам",
-    "ZA": "ЮАР",
-}
-
-ALPHA3_TO_ALPHA2 = {
-    "ARE": "AE",
-    "AUS": "AU",
-    "AUT": "AT",
-    "BEL": "BE",
-    "BGR": "BG",
-    "BHR": "BH",
-    "BRA": "BR",
-    "CAN": "CA",
-    "CHE": "CH",
-    "CHN": "CN",
-    "CYP": "CY",
-    "CZE": "CZ",
-    "DEU": "DE",
-    "DNK": "DK",
-    "EGY": "EG",
-    "ESP": "ES",
-    "EST": "EE",
-    "FIN": "FI",
-    "FRA": "FR",
-    "GBR": "GB",
-    "GRC": "GR",
-    "HKG": "HK",
-    "HRV": "HR",
-    "HUN": "HU",
-    "IDN": "ID",
-    "IND": "IN",
-    "IRL": "IE",
-    "ISL": "IS",
-    "ISR": "IL",
-    "ITA": "IT",
-    "JPN": "JP",
-    "KOR": "KR",
-    "KWT": "KW",
-    "LTU": "LT",
-    "LUX": "LU",
-    "LVA": "LV",
-    "MEX": "MX",
-    "MYS": "MY",
-    "NLD": "NL",
-    "NOR": "NO",
-    "NZL": "NZ",
-    "OMN": "OM",
-    "PHL": "PH",
-    "POL": "PL",
-    "PRT": "PT",
-    "QAT": "QA",
-    "ROU": "RO",
-    "SAU": "SA",
-    "SGP": "SG",
-    "SVK": "SK",
-    "SVN": "SI",
-    "SWE": "SE",
-    "THA": "TH",
-    "TUN": "TN",
-    "TUR": "TR",
-    "TWN": "TW",
-    "USA": "US",
-    "VNM": "VN",
-    "ZAF": "ZA",
-}
-
-COUNTRY_NAME_BY_CODE: dict[str, str] = {
-    "AE": "UAE",
-    "AU": "Australia",
-    "AT": "Austria",
-    "BE": "Belgium",
-    "BG": "Bulgaria",
-    "BH": "Bahrain",
-    "BR": "Brazil",
-    "CA": "Canada",
-    "CH": "Switzerland",
-    "CN": "China",
-    "CY": "Cyprus",
-    "CZ": "Czech Republic",
-    "DE": "Germany",
-    "DK": "Denmark",
-    "EE": "Estonia",
-    "EG": "Egypt",
-    "ES": "Spain",
-    "FI": "Finland",
-    "FR": "France",
-    "GB": "United Kingdom",
-    "GR": "Greece",
-    "HK": "Hong Kong",
-    "HR": "Croatia",
-    "HU": "Hungary",
-    "ID": "Indonesia",
-    "IE": "Ireland",
-    "IL": "Israel",
-    "IN": "India",
-    "IS": "Iceland",
-    "IT": "Italy",
-    "JO": "Jordan",
-    "JP": "Japan",
-    "KE": "Kenya",
-    "KH": "Cambodia",
-    "KR": "South Korea",
-    "KW": "Kuwait",
-    "LK": "Sri Lanka",
-    "LT": "Lithuania",
-    "LU": "Luxembourg",
-    "LV": "Latvia",
-    "MA": "Morocco",
-    "MT": "Malta",
-    "MX": "Mexico",
-    "MY": "Malaysia",
-    "NG": "Nigeria",
-    "NL": "Netherlands",
-    "NO": "Norway",
-    "NP": "Nepal",
-    "NZ": "New Zealand",
-    "OM": "Oman",
-    "PE": "Peru",
-    "PH": "Philippines",
-    "PL": "Poland",
-    "PT": "Portugal",
-    "QA": "Qatar",
-    "RO": "Romania",
-    "SA": "Saudi Arabia",
-    "SE": "Sweden",
-    "SG": "Singapore",
-    "SI": "Slovenia",
-    "SK": "Slovakia",
-    "TH": "Thailand",
-    "TN": "Tunisia",
-    "TR": "Turkey",
-    "TW": "Taiwan",
-    "US": "United States",
-    "VN": "Vietnam",
-    "ZA": "South Africa",
-}
-
-FALLBACK_COUNTRIES: list[dict[str, Any]] = [
-    {"code": "AL", "name": "Albania", "region": "Europe"},
-    {"code": "AT", "name": "Austria", "region": "Europe"},
-    {"code": "BE", "name": "Belgium", "region": "Europe"},
-    {"code": "BG", "name": "Bulgaria", "region": "Europe"},
-    {"code": "CH", "name": "Switzerland", "region": "Europe"},
-    {"code": "CY", "name": "Cyprus", "region": "Europe"},
-    {"code": "CZ", "name": "Czech Republic", "region": "Europe"},
-    {"code": "DE", "name": "Germany", "region": "Europe"},
-    {"code": "DK", "name": "Denmark", "region": "Europe"},
-    {"code": "EE", "name": "Estonia", "region": "Europe"},
-    {"code": "ES", "name": "Spain", "region": "Europe"},
-    {"code": "FI", "name": "Finland", "region": "Europe"},
-    {"code": "FR", "name": "France", "region": "Europe"},
-    {"code": "GB", "name": "United Kingdom", "region": "Europe"},
-    {"code": "GR", "name": "Greece", "region": "Europe"},
-    {"code": "HR", "name": "Croatia", "region": "Europe"},
-    {"code": "HU", "name": "Hungary", "region": "Europe"},
-    {"code": "IE", "name": "Ireland", "region": "Europe"},
-    {"code": "IS", "name": "Iceland", "region": "Europe"},
-    {"code": "IT", "name": "Italy", "region": "Europe"},
-    {"code": "LT", "name": "Lithuania", "region": "Europe"},
-    {"code": "LU", "name": "Luxembourg", "region": "Europe"},
-    {"code": "LV", "name": "Latvia", "region": "Europe"},
-    {"code": "MT", "name": "Malta", "region": "Europe"},
-    {"code": "NL", "name": "Netherlands", "region": "Europe"},
-    {"code": "NO", "name": "Norway", "region": "Europe"},
-    {"code": "PL", "name": "Poland", "region": "Europe"},
-    {"code": "PT", "name": "Portugal", "region": "Europe"},
-    {"code": "RO", "name": "Romania", "region": "Europe"},
-    {"code": "SE", "name": "Sweden", "region": "Europe"},
-    {"code": "SI", "name": "Slovenia", "region": "Europe"},
-    {"code": "SK", "name": "Slovakia", "region": "Europe"},
-    {"code": "TR", "name": "Turkey", "region": "Europe"},
-    {"code": "AE", "name": "UAE", "region": "Middle East"},
-    {"code": "BH", "name": "Bahrain", "region": "Middle East"},
-    {"code": "IL", "name": "Israel", "region": "Middle East"},
-    {"code": "JO", "name": "Jordan", "region": "Middle East"},
-    {"code": "KW", "name": "Kuwait", "region": "Middle East"},
-    {"code": "OM", "name": "Oman", "region": "Middle East"},
-    {"code": "QA", "name": "Qatar", "region": "Middle East"},
-    {"code": "SA", "name": "Saudi Arabia", "region": "Middle East"},
-    {"code": "CN", "name": "China", "region": "Asia"},
-    {"code": "HK", "name": "Hong Kong", "region": "Asia"},
-    {"code": "ID", "name": "Indonesia", "region": "Asia"},
-    {"code": "IN", "name": "India", "region": "Asia"},
-    {"code": "JP", "name": "Japan", "region": "Asia"},
-    {"code": "KH", "name": "Cambodia", "region": "Asia"},
-    {"code": "KR", "name": "South Korea", "region": "Asia"},
-    {"code": "LK", "name": "Sri Lanka", "region": "Asia"},
-    {"code": "MY", "name": "Malaysia", "region": "Asia"},
-    {"code": "NP", "name": "Nepal", "region": "Asia"},
-    {"code": "PH", "name": "Philippines", "region": "Asia"},
-    {"code": "SG", "name": "Singapore", "region": "Asia"},
-    {"code": "TH", "name": "Thailand", "region": "Asia"},
-    {"code": "TW", "name": "Taiwan", "region": "Asia"},
-    {"code": "VN", "name": "Vietnam", "region": "Asia"},
-    {"code": "AU", "name": "Australia", "region": "Oceania"},
-    {"code": "NZ", "name": "New Zealand", "region": "Oceania"},
-    {"code": "CA", "name": "Canada", "region": "North America"},
-    {"code": "MX", "name": "Mexico", "region": "North America"},
-    {"code": "US", "name": "United States", "region": "North America"},
-    {"code": "AR", "name": "Argentina", "region": "South America"},
-    {"code": "BR", "name": "Brazil", "region": "South America"},
-    {"code": "CL", "name": "Chile", "region": "South America"},
-    {"code": "CO", "name": "Colombia", "region": "South America"},
-    {"code": "PE", "name": "Peru", "region": "South America"},
-    {"code": "ZA", "name": "South Africa", "region": "Africa"},
-    {"code": "EG", "name": "Egypt", "region": "Africa"},
-    {"code": "MA", "name": "Morocco", "region": "Africa"},
-    {"code": "TN", "name": "Tunisia", "region": "Africa"},
-    {"code": "KE", "name": "Kenya", "region": "Africa"},
-    {"code": "NG", "name": "Nigeria", "region": "Africa"},
-]
+@dataclass(frozen=True)
+class CountryItem:
+    code: str
+    supplier_code: str
+    continent: str
+    name_en: str
+    name_ru: str
+    popular: bool
 
 
 class CatalogService:
+    CONTINENT_ORDER = [
+        "europe",
+        "asia",
+        "north_america",
+        "south_america",
+        "africa",
+        "middle_east",
+        "global_plans",
+    ]
+
+    CONTINENT_EMOJI = {
+        "europe": "🇪🇺",
+        "asia": "🌏",
+        "north_america": "🌎",
+        "south_america": "🌎",
+        "africa": "🌍",
+        "middle_east": "🕌",
+        "global_plans": "🌐",
+    }
+
+    COUNTRIES: list[CountryItem] = [
+        CountryItem("GB", "GB", "europe", "United Kingdom", "Великобритания", True),
+        CountryItem("DE", "DE", "europe", "Germany", "Германия", True),
+        CountryItem("FR", "FR", "europe", "France", "Франция", True),
+        CountryItem("IT", "IT", "europe", "Italy", "Италия", True),
+        CountryItem("ES", "ES", "europe", "Spain", "Испания", True),
+        CountryItem("TR", "TR", "europe", "Turkey", "Турция", True),
+        CountryItem("AT", "AT", "europe", "Austria", "Австрия", False),
+        CountryItem("BE", "BE", "europe", "Belgium", "Бельгия", False),
+        CountryItem("BG", "BG", "europe", "Bulgaria", "Болгария", False),
+        CountryItem("CH", "CH", "europe", "Switzerland", "Швейцария", False),
+        CountryItem("CZ", "CZ", "europe", "Czech Republic", "Чехия", False),
+        CountryItem("GR", "GR", "europe", "Greece", "Греция", False),
+        CountryItem("HR", "HR", "europe", "Croatia", "Хорватия", False),
+        CountryItem("HU", "HU", "europe", "Hungary", "Венгрия", False),
+        CountryItem("IE", "IE", "europe", "Ireland", "Ирландия", False),
+        CountryItem("NL", "NL", "europe", "Netherlands", "Нидерланды", False),
+        CountryItem("NO", "NO", "europe", "Norway", "Норвегия", False),
+        CountryItem("PL", "PL", "europe", "Poland", "Польша", False),
+        CountryItem("PT", "PT", "europe", "Portugal", "Португалия", False),
+        CountryItem("RO", "RO", "europe", "Romania", "Румыния", False),
+        CountryItem("SE", "SE", "europe", "Sweden", "Швеция", False),
+
+        CountryItem("TH", "TH", "asia", "Thailand", "Таиланд", True),
+        CountryItem("JP", "JP", "asia", "Japan", "Япония", True),
+        CountryItem("SG", "SG", "asia", "Singapore", "Сингапур", True),
+        CountryItem("ID", "ID", "asia", "Indonesia", "Индонезия", True),
+        CountryItem("MY", "MY", "asia", "Malaysia", "Малайзия", True),
+        CountryItem("VN", "VN", "asia", "Vietnam", "Вьетнам", True),
+        CountryItem("CN", "CN", "asia", "China", "Китай", False),
+        CountryItem("HK", "HK", "asia", "Hong Kong", "Гонконг", False),
+        CountryItem("IN", "IN", "asia", "India", "Индия", False),
+        CountryItem("KR", "KR", "asia", "South Korea", "Южная Корея", False),
+        CountryItem("KZ", "KZ", "asia", "Kazakhstan", "Казахстан", False),
+        CountryItem("LK", "LK", "asia", "Sri Lanka", "Шри-Ланка", False),
+        CountryItem("MN", "MN", "asia", "Mongolia", "Монголия", False),
+        CountryItem("PH", "PH", "asia", "Philippines", "Филиппины", False),
+        CountryItem("PK", "PK", "asia", "Pakistan", "Пакистан", False),
+        CountryItem("TW", "TW", "asia", "Taiwan", "Тайвань", False),
+        CountryItem("UZ", "UZ", "asia", "Uzbekistan", "Узбекистан", False),
+
+        CountryItem("US", "US", "north_america", "United States", "США", True),
+        CountryItem("CA", "CA", "north_america", "Canada", "Канада", True),
+        CountryItem("MX", "MX", "north_america", "Mexico", "Мексика", True),
+        CountryItem("CR", "CR", "north_america", "Costa Rica", "Коста-Рика", False),
+        CountryItem("DO", "DO", "north_america", "Dominican Republic", "Доминикана", False),
+        CountryItem("GT", "GT", "north_america", "Guatemala", "Гватемала", False),
+        CountryItem("JM", "JM", "north_america", "Jamaica", "Ямайка", False),
+        CountryItem("PA", "PA", "north_america", "Panama", "Панама", False),
+
+        CountryItem("BR", "BR", "south_america", "Brazil", "Бразилия", True),
+        CountryItem("AR", "AR", "south_america", "Argentina", "Аргентина", True),
+        CountryItem("CL", "CL", "south_america", "Chile", "Чили", True),
+        CountryItem("CO", "CO", "south_america", "Colombia", "Колумбия", True),
+        CountryItem("PE", "PE", "south_america", "Peru", "Перу", False),
+        CountryItem("UY", "UY", "south_america", "Uruguay", "Уругвай", False),
+        CountryItem("EC", "EC", "south_america", "Ecuador", "Эквадор", False),
+
+        CountryItem("EG", "EG", "africa", "Egypt", "Египет", True),
+        CountryItem("ZA", "ZA", "africa", "South Africa", "ЮАР", True),
+        CountryItem("MA", "MA", "africa", "Morocco", "Марокко", True),
+        CountryItem("KE", "KE", "africa", "Kenya", "Кения", False),
+        CountryItem("NG", "NG", "africa", "Nigeria", "Нигерия", False),
+        CountryItem("TN", "TN", "africa", "Tunisia", "Тунис", False),
+        CountryItem("GH", "GH", "africa", "Ghana", "Гана", False),
+        CountryItem("TZ", "TZ", "africa", "Tanzania", "Танзания", False),
+        CountryItem("UG", "UG", "africa", "Uganda", "Уганда", False),
+
+        CountryItem("AE", "AE", "middle_east", "United Arab Emirates", "ОАЭ", True),
+        CountryItem("SA", "SA", "middle_east", "Saudi Arabia", "Саудовская Аравия", True),
+        CountryItem("QA", "QA", "middle_east", "Qatar", "Катар", False),
+        CountryItem("OM", "OM", "middle_east", "Oman", "Оман", False),
+        CountryItem("BH", "BH", "middle_east", "Bahrain", "Бахрейн", False),
+        CountryItem("IL", "IL", "middle_east", "Israel", "Израиль", False),
+        CountryItem("JO", "JO", "middle_east", "Jordan", "Иордания", False),
+        CountryItem("KW", "KW", "middle_east", "Kuwait", "Кувейт", False),
+
+        CountryItem("GL", "GLOBAL", "global_plans", "Global Plan", "Глобальный тариф", True),
+    ]
+
     def __init__(
         self,
-        api_client: EsimAccessClient,
-        pricing_service: PricingService,
-        cache_service: InMemoryTTLCache,
+        supplier_client: SupplierAPIClient,
+        cache: CacheService,
+        pricing: PricingService,
+        cache_ttl_seconds: int,
     ) -> None:
-        self.api_client = api_client
-        self.pricing_service = pricing_service
-        self.cache_service = cache_service
+        self.supplier_client = supplier_client
+        self.cache = cache
+        self.pricing = pricing
+        self.cache_ttl_seconds = cache_ttl_seconds
+        self._country_map = {country.code: country for country in self.COUNTRIES}
 
-    @staticmethod
-    def _normalize_region(region_raw: str | None) -> str:
-        if not region_raw:
-            return "Other"
-        key = region_raw.strip().lower()
-        return REGION_ALIASES.get(key, region_raw.strip().title())
-
-    @staticmethod
-    def _local_name_ru(name_en: str, code: str) -> str:
-        return RU_COUNTRY_NAMES.get(code.upper(), name_en)
-
-    @staticmethod
-    def _normalize_country_code(code: str) -> str:
-        code_up = (code or "").upper().strip()
-        if len(code_up) == 3:
-            return ALPHA3_TO_ALPHA2.get(code_up, code_up)
-        return code_up
-
-    @staticmethod
-    def _fallback_region_map() -> dict[str, str]:
-        return {item["code"].upper(): item["region"] for item in FALLBACK_COUNTRIES}
-
-    @staticmethod
-    def _fallback_name_map() -> dict[str, str]:
-        return {item["code"].upper(): item["name"] for item in FALLBACK_COUNTRIES}
-
-    @staticmethod
-    def _fallback_name_to_region_map() -> dict[str, str]:
-        return {item["name"].strip().lower(): item["region"] for item in FALLBACK_COUNTRIES}
-
-    async def get_all_countries(self, use_cache: bool = True) -> list[dict[str, Any]]:
-        cache_key = "__countries__"
-        if use_cache:
-            cached = self.cache_service.get(cache_key)
-            if cached is not None:
-                return cached
-
-        fallback_regions = self._fallback_region_map()
-        fallback_names = self._fallback_name_map()
-        fallback_name_to_region = self._fallback_name_to_region_map()
-        country_map: dict[str, dict[str, Any]] = {}
-
-        # 1) Try official countries endpoint first.
-        try:
-            countries = await self.api_client.get_countries()
-        except Exception:
-            countries = []
-
-        for c in countries:
-            if not c.get("code"):
-                continue
-            code = self._normalize_country_code(c["code"])
-            if len(code) != 2:
-                continue
-            name_en = c.get("name") or c.get("name_en") or fallback_names.get(code) or code
-            region = c.get("region") or fallback_regions.get(code) or "Other"
-            country_map[code] = {
-                "code": code,
-                "name_en": name_en,
-                "name_ru": self._local_name_ru(name_en, code),
-                "region": self._normalize_region(region),
-                "popularity_score": float(c.get("popularity_score") or 0),
-            }
-
-        # 2) Enrich with package list (stable path from your older working version).
-        try:
-            all_packages = await self.api_client.get_all_packages()
-        except Exception:
-            all_packages = []
-
-        for pkg in all_packages:
-            raw = pkg.get("raw", {})
-            raw_code = (
-                raw.get("countryCode")
-                or raw.get("country")
-                or raw.get("locationCode")
-                or pkg.get("country")
-                or pkg.get("location_code")
-                or ""
-            )
-            code = self._normalize_country_code(str(raw_code))
-            if len(code) != 2:
-                continue
-
-            net_list = raw.get("locationNetworkList")
-            location_name = ""
-            if isinstance(net_list, list) and net_list and isinstance(net_list[0], dict):
-                location_name = str(net_list[0].get("locationName") or "").strip()
-
-            name_en = (
-                country_map.get(code, {}).get("name_en")
-                or location_name
-                or raw.get("countryName")
-                or fallback_names.get(code)
-                or COUNTRY_NAME_BY_CODE.get(code)
-                or code
-            )
-            region = (
-                country_map.get(code, {}).get("region")
-                or fallback_regions.get(code)
-                or fallback_name_to_region.get(str(name_en).strip().lower())
-                or "Other"
-            )
-            popularity = max(
-                float(country_map.get(code, {}).get("popularity_score") or 0),
-                float(pkg.get("popularity_score") or 0),
-            )
-            country_map[code] = {
-                "code": code,
-                "name_en": str(name_en),
-                "name_ru": self._local_name_ru(str(name_en), code),
-                "region": self._normalize_region(str(region)),
-                "popularity_score": popularity,
-            }
-
-        # 3) Safety fallback list.
-        if not country_map:
-            for c in FALLBACK_COUNTRIES:
-                code = self._normalize_country_code(c["code"])
-                if len(code) != 2:
-                    continue
-                name_en = c["name"]
-                country_map[code] = {
-                    "code": code,
-                    "name_en": name_en,
-                    "name_ru": self._local_name_ru(name_en, code),
-                    "region": self._normalize_region(c["region"]),
-                    "popularity_score": 0.0,
-                }
-
-        normalized = list(country_map.values())
-
-        normalized.sort(key=lambda x: x["name_en"].lower())
-        if use_cache:
-            self.cache_service.set(cache_key, normalized)
-        return normalized
-
-    async def get_regions(self) -> list[str]:
-        countries = await self.get_all_countries(use_cache=True)
-        region_set = {country["region"] for country in countries}
-
-        ordered = [region for region in REGION_PRIORITY if region in region_set]
-        leftovers = sorted(region_set.difference(set(ordered)))
-        return ordered + leftovers
-
-    async def get_countries_by_region(self, region: str) -> list[dict[str, Any]]:
-        countries = await self.get_all_countries(use_cache=True)
-        filtered = [country for country in countries if country["region"] == region]
-        filtered.sort(key=lambda x: x["name_en"].lower())
-        return filtered
-
-    async def get_country_packages(self, country_code: str, use_cache: bool = True) -> list[dict[str, Any]]:
-        key = country_code.upper()
-        if use_cache:
-            cached = self.cache_service.get(key)
-            if cached is not None:
-                return cached
-
-        try:
-            packages = await self.api_client.get_packages(country_code=key)
-        except RuntimeError as exc:
-            error_text = str(exc).lower()
-            if "error 400" in error_text or "error 404" in error_text:
-                packages = []
-            else:
-                raise
-
-        # Fallback strategy from previously working flow: fetch all packages and filter locally.
-        if not packages:
-            try:
-                all_packages = await self.api_client.get_all_packages()
-            except Exception:
-                all_packages = []
-
-            if all_packages:
-                filtered: list[dict[str, Any]] = []
-                for pkg in all_packages:
-                    raw = pkg.get("raw", {})
-                    candidates = [
-                        self._normalize_country_code(str(pkg.get("country") or "")),
-                        self._normalize_country_code(str(pkg.get("location_code") or "")),
-                        self._normalize_country_code(str(raw.get("countryCode") or "")),
-                        self._normalize_country_code(str(raw.get("country") or "")),
-                        self._normalize_country_code(str(raw.get("locationCode") or "")),
-                    ]
-                    if key in candidates:
-                        filtered.append(pkg)
-                packages = filtered
-
-        priced_packages: list[dict[str, Any]] = []
-
-        for package in packages:
-            if package["wholesale_price"] <= 0 or package["data_gb"] <= 0:
-                continue
-
-            retail = self.pricing_service.retail_price_usd(package["wholesale_price"], key)
-            stars = self.pricing_service.usd_to_stars(retail)
-            value_score = package["data_gb"] / retail if retail else 0
-            popularity_score = float(package.get("popularity_score") or 0)
-
-            priced_packages.append(
+    def get_continents(self, lang: str, t_func) -> list[dict[str, str]]:
+        data: list[dict[str, str]] = []
+        for key in self.CONTINENT_ORDER:
+            data.append(
                 {
-                    **package,
-                    "retail_price": retail,
-                    "stars_amount": stars,
-                    "value_score": round(value_score, 6),
-                    "popularity_score": popularity_score,
+                    "key": key,
+                    "name": t_func(lang, key),
+                    "emoji": self.CONTINENT_EMOJI.get(key, "🌐"),
+                }
+            )
+        return data
+
+    def _country_name(self, country: CountryItem, lang: str) -> str:
+        return country.name_ru if lang == "ru" else country.name_en
+
+    def get_country_by_code(self, country_code: str) -> CountryItem | None:
+        return self._country_map.get(country_code.upper())
+
+    def list_countries(self, continent: str, lang: str) -> list[dict[str, Any]]:
+        items = [country for country in self.COUNTRIES if country.continent == continent]
+
+        popular = [item for item in items if item.popular]
+        regular = [item for item in items if not item.popular]
+        regular.sort(key=lambda item: self._country_name(item, lang).lower())
+        ordered = popular + regular
+
+        result: list[dict[str, Any]] = []
+        for country in ordered:
+            result.append(
+                {
+                    "code": country.code,
+                    "supplier_code": country.supplier_code,
+                    "name": self._country_name(country, lang),
+                    "flag": country_flag(country.code),
+                    "popular": country.popular,
+                }
+            )
+        return result
+
+    def paginate_countries(self, continent: str, lang: str, page: int, page_size: int = 10) -> tuple[list[dict[str, Any]], int, int]:
+        countries = self.list_countries(continent, lang)
+        return paginate_items(countries, page, page_size)
+
+    async def get_tariffs(self, country_code: str, force_fresh: bool = False) -> list[dict[str, Any]]:
+        country = self.get_country_by_code(country_code)
+        if not country:
+            return []
+
+        cache_key = f"packages:{country.code}"
+        if not force_fresh:
+            cached = self.cache.get(cache_key)
+            if isinstance(cached, list):
+                return cached
+
+        raw_packages = await self.supplier_client.get_packages_by_country(country.supplier_code)
+
+        tariffs: list[dict[str, Any]] = []
+        for package in raw_packages:
+            wholesale = float(package["wholesale_price_usd"])
+            retail_usd = self.pricing.calculate_retail_usd(wholesale, country.code)
+            stars = self.pricing.usd_to_stars(retail_usd)
+            data_gb = round(float(package["volume_mb"]) / 1024, 3)
+            validity_days = int(package["validity_days"])
+            value_score = self.pricing.calculate_value_score(data_gb, retail_usd, validity_days)
+
+            tariffs.append(
+                {
+                    "package_code": package["package_code"],
+                    "country_code": country.code,
+                    "country_name_en": country.name_en,
+                    "country_name_ru": country.name_ru,
+                    "data_amount_gb": data_gb,
+                    "validity_days": validity_days,
+                    "wholesale_price_usd": wholesale,
+                    "retail_price_usd": retail_usd,
+                    "retail_price_stars": stars,
+                    "value_score": value_score,
                 }
             )
 
-        if use_cache:
-            self.cache_service.set(key, priced_packages)
-        return priced_packages
+        tariffs.sort(key=lambda x: x["value_score"], reverse=True)
+        self.cache.set(cache_key, tariffs, self.cache_ttl_seconds)
+        return tariffs
 
-    @staticmethod
-    def sort_packages(packages: list[dict[str, Any]], sort_by: str) -> list[dict[str, Any]]:
-        if sort_by == "popular":
-            return sorted(
-                packages,
-                key=lambda p: (
-                    p.get("popularity_score", 0),
-                    p.get("value_score", 0),
-                    -p.get("retail_price", 0),
-                ),
-                reverse=True,
-            )
-
-        return sorted(
-            packages,
-            key=lambda p: (
-                p.get("value_score", 0),
-                -p.get("retail_price", 0),
-                p.get("data_gb", 0),
-            ),
-            reverse=True,
-        )
-
-    @staticmethod
-    def find_by_code(packages: list[dict[str, Any]], package_code: str) -> dict[str, Any] | None:
-        for item in packages:
-            if item["code"] == package_code:
-                return item
+    async def get_tariff_by_code(self, country_code: str, package_code: str, force_fresh: bool = False) -> dict[str, Any] | None:
+        tariffs = await self.get_tariffs(country_code, force_fresh=force_fresh)
+        for tariff in tariffs:
+            if tariff["package_code"] == package_code:
+                return tariff
         return None
+
+    def paginate_tariffs(self, tariffs: list[dict[str, Any]], page: int, page_size: int = 8) -> tuple[list[dict[str, Any]], int, int]:
+        return paginate_items(tariffs, page, page_size)
