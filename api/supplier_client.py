@@ -100,10 +100,25 @@ class SupplierAPIClient:
         price = SupplierAPIClient._to_float(value, 0.0)
         if price <= 0:
             return 0.0
-        # Supplier payloads may return price in cents or even in 1/100 of cents.
-        # Normalize progressively until we get a realistic USD value.
+
+        # Many supplier payloads return integer-like cents:
+        # 470 -> $4.70, 30 -> $0.30, 1220 -> $12.20.
+        # If source value has no decimal separator, treat it as cents first.
+        is_integer_like = False
+        if isinstance(value, int):
+            is_integer_like = True
+        elif isinstance(value, str):
+            raw = value.strip()
+            if raw and "." not in raw and "," not in raw:
+                is_integer_like = True
+
+        if is_integer_like:
+            price = price / 100.0
+
+        # Extra guard: some responses may still be scaled by 100 more.
         while price > 500:
             price = price / 100.0
+
         return round(price, 4)
 
     @staticmethod
