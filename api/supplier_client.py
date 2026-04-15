@@ -67,6 +67,18 @@ class SupplierAPIClient:
         return data
 
     @staticmethod
+    def _extract_list_payload(data: Any) -> list[Any]:
+        """Supplier may return list directly or wrap it into various dict keys."""
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            for key in ("list", "records", "rows", "packages", "packageList", "dataList", "items"):
+                value = data.get(key)
+                if isinstance(value, list):
+                    return value
+        return []
+
+    @staticmethod
     def _to_float(value: Any, default: float = 0.0) -> float:
         if value is None:
             return default
@@ -209,22 +221,72 @@ class SupplierAPIClient:
         return normalized
 
     async def get_packages_by_country(self, country_code: str) -> list[dict[str, Any]]:
-        payload = {"locationCode": country_code.upper()}
-        raw = await self._request("POST", "/api/v1/open/package/list", payload)
-        obj = self._extract_obj(raw)
-        if not isinstance(obj, list):
-            raise SupplierAPIError("Unexpected package response shape")
+        cc = country_code.upper()
 
-        results: list[dict[str, Any]] = []
-        for item in obj:
-            if not isinstance(item, dict):
-                continue
-            norm = self._normalize_package(item)
-            if norm:
-                if not norm.get("country_code"):
-                    norm["country_code"] = country_code.upper()
-                results.append(norm)
-        return results
+        payload_attempts = [
+            {"locationCode": cc},
+            {"countryCode": cc},
+            {"location": cc},
+            {"isoCode": cc},
+        ]
+
+        last_error: Exception | None = None
+        for payload in payload_attempts:
+            try:
+                raw = await self._request("POST", "/api/v1/open/package/list", payload)
+                obj = self._extract_obj(raw)
+                raw_list = self._extract_list_payload(obj)
+                if not raw_list:
+                    continue
+
+                results: list[dict[str, Any]] = []
+                for item in raw_list:
+                    if not isinstance(item, dict):
+                        continue
+                    norm = self._normalize_package(item)
+                    if not norm:
+                        continue
+
+                    if not norm.get("country_code"):
+                        norm["country_code"] = cc
+
+                    # Keep exact country and global entries only.
+                    ncc = str(norm.get("country_code", "")).upper()
+                    if ncc and ncc not in {cc, "GLOBAL", "GL"}:
+                        continue
+                    results.append(norm)
+
+                if results:
+                    return results
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                logger.exception("Package list request failed for payload=%s country=%s", payload, cc)
+
+        # Fallback: request without filters and filter locally.
+        try:
+            raw = await self._request("POST", "/api/v1/open/package/list", {})
+            obj = self._extract_obj(raw)
+            raw_list = self._extract_list_payload(obj)
+            results: list[dict[str, Any]] = []
+            for item in raw_list:
+                if not isinstance(item, dict):
+                    continue
+                norm = self._normalize_package(item)
+                if not norm:
+                    continue
+
+                ncc = str(norm.get("country_code", "")).upper()
+                if ncc in {cc, "GLOBAL", "GL"}:
+                    results.append(norm)
+            if results:
+                return results
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            logger.exception("Unfiltered package list fallback failed for country=%s", cc)
+
+        if last_error:
+            raise SupplierAPIError(f"Failed to load packages for {cc}: {last_error}") from last_error
+        return []
 
     async def purchase_esim(self, package_code: str, quantity: int = 1, order_ref: str | None = None) -> dict[str, Any]:
         payload: dict[str, Any] = {

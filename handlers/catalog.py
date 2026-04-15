@@ -5,6 +5,7 @@ import logging
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
 
+from api.supplier_client import SupplierAPIError
 from services.runtime_context import get_services
 
 from keyboards.catalog import continents_keyboard, countries_keyboard
@@ -107,7 +108,12 @@ async def _show_tariffs(callback: CallbackQuery, country_code: str, continent_ke
         await callback.message.answer(localization.t(lang, "no_tariffs"))
         return
 
-    tariffs = await catalog.get_tariffs(country_code)
+    try:
+        tariffs = await catalog.get_tariffs(country_code)
+    except SupplierAPIError:
+        logger.exception("Supplier API failed for country=%s", country_code)
+        await callback.message.answer(localization.t(lang, "no_tariffs"))
+        return
     if not tariffs:
         await callback.message.answer(localization.t(lang, "no_tariffs"))
         return
