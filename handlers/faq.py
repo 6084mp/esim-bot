@@ -4,6 +4,8 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from services.runtime_context import get_services
+
 router = Router()
 
 FAQ_TEXTS = {"FAQ"}
@@ -20,14 +22,14 @@ TOPICS = [
 
 
 async def _lang(obj) -> str:
-    services = obj.bot["services"]
+    services = get_services()
     order_service = services["order_service"]
     settings = services["settings"]
     return await order_service.get_user_language(obj.from_user.id, settings.default_language)
 
 
 async def _faq_menu(target, lang: str) -> None:
-    services = target.bot["services"]
+    services = get_services()
     localization = services["localization"]
 
     kb = InlineKeyboardBuilder()
@@ -54,7 +56,7 @@ async def faq_callback(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("faq_topic:"))
 async def faq_topic(callback: CallbackQuery) -> None:
     _, topic = callback.data.split(":", 1)
-    services = callback.message.bot["services"]
+    services = get_services()
     localization = services["localization"]
     lang = await _lang(callback)
 

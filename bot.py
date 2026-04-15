@@ -16,6 +16,7 @@ from services.delivery_service import DeliveryService
 from services.localization_service import LocalizationService
 from services.order_service import OrderService
 from services.pricing_service import PricingService
+from services.runtime_context import set_services
 
 logging.basicConfig(
     level=logging.INFO,
@@ -69,11 +70,11 @@ def build_services(settings: Settings) -> dict:
 async def main() -> None:
     settings = get_settings()
     services = build_services(settings)
+    set_services(services)
 
     await create_db(services["engine"])
 
     bot = Bot(token=settings.bot_token)
-    bot["services"] = services
 
     dp = Dispatcher()
     register_handlers(dp)

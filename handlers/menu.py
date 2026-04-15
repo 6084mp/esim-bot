@@ -3,6 +3,8 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 
+from services.runtime_context import get_services
+
 from keyboards.main_menu import main_menu_keyboard
 
 router = Router()
@@ -10,7 +12,7 @@ router = Router()
 
 @router.callback_query(F.data == "menu:open")
 async def menu_open_cb(callback: CallbackQuery) -> None:
-    services = callback.message.bot["services"]
+    services = get_services()
     localization = services["localization"]
     order_service = services["order_service"]
     settings = services["settings"]

@@ -4,6 +4,8 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery, LabeledPrice
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from services.runtime_context import get_services
+
 from keyboards.tariff import tariff_detail_keyboard
 from utils.flags import country_flag
 from utils.formatters import format_data_gb, format_usd
@@ -12,7 +14,7 @@ router = Router()
 
 
 async def _lang(obj) -> str:
-    services = obj.bot["services"]
+    services = get_services()
     settings = services["settings"]
     return await order_service.get_user_language(obj.from_user.id, settings.default_language)
 
@@ -21,7 +23,7 @@ async def _lang(obj) -> str:
 async def tariff_detail(callback: CallbackQuery) -> None:
     _, country_code, continent_key, package_code, page_s = callback.data.split(":", 4)
 
-    services = callback.message.bot["services"]
+    services = get_services()
     localization = services["localization"]
     catalog = services["catalog_service"]
 
@@ -62,14 +64,14 @@ async def tariff_detail(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("crypto:"))
 async def crypto_disabled(callback: CallbackQuery) -> None:
     lang = await _lang(callback)
-    localization = callback.message.bot["services"]["localization"]
+    localization = get_services()["localization"]
     await callback.answer(localization.t(lang, "crypto_unavailable"), show_alert=True)
 
 
 @router.callback_query(F.data.startswith("pay:"))
 async def pay_stars(callback: CallbackQuery) -> None:
     _, country_code, package_code = callback.data.split(":", 2)
-    services = callback.message.bot["services"]
+    services = get_services()
     localization = services["localization"]
     catalog = services["catalog_service"]
     order_service = services["order_service"]
@@ -114,9 +116,9 @@ async def pay_stars(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("payconfirm:"))
 async def pay_confirm(callback: CallbackQuery) -> None:
     _, country_code, package_code = callback.data.split(":", 2)
-    catalog = callback.message.bot["services"]["catalog_service"]
+    catalog = get_services()["catalog_service"]
     lang = await _lang(callback)
-    localization = callback.message.bot["services"]["localization"]
+    localization = get_services()["localization"]
 
     fresh_tariff = await catalog.get_tariff_by_code(country_code, package_code, force_fresh=True)
     if not fresh_tariff:
@@ -127,7 +129,7 @@ async def pay_confirm(callback: CallbackQuery) -> None:
 
 
 async def _send_invoice(callback: CallbackQuery, tariff: dict) -> None:
-    services = callback.message.bot["services"]
+    services = get_services()
     localization = services["localization"]
     order_service = services["order_service"]
     catalog = services["catalog_service"]

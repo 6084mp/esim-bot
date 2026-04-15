@@ -5,11 +5,13 @@ import asyncio
 from aiogram import F, Router
 from aiogram.types import Message, PreCheckoutQuery
 
+from services.runtime_context import get_services
+
 router = Router()
 
 
 async def _lang(obj) -> str:
-    services = obj.bot["services"]
+    services = get_services()
     order_service = services["order_service"]
     settings = services["settings"]
     return await order_service.get_user_language(obj.from_user.id, settings.default_language)
@@ -22,7 +24,7 @@ async def pre_checkout(pre_checkout_query: PreCheckoutQuery) -> None:
 
 @router.message(F.successful_payment)
 async def successful_payment(message: Message) -> None:
-    services = message.bot["services"]
+    services = get_services()
     order_service = services["order_service"]
     delivery_service = services["delivery_service"]
     localization = services["localization"]

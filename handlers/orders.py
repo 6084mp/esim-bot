@@ -4,6 +4,8 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from services.runtime_context import get_services
+
 from keyboards.common import post_delivery_keyboard
 from utils.formatters import format_data_gb
 
@@ -13,14 +15,14 @@ ORDER_TEXTS = {"My Orders", "Мои заказы"}
 
 
 async def _lang(obj) -> str:
-    services = obj.bot["services"]
+    services = get_services()
     order_service = services["order_service"]
     settings = services["settings"]
     return await order_service.get_user_language(obj.from_user.id, settings.default_language)
 
 
 async def _show_orders(target, user_id: int, lang: str) -> None:
-    services = target.bot["services"]
+    services = get_services()
     order_service = services["order_service"]
     localization = services["localization"]
 
@@ -63,7 +65,7 @@ async def orders_callback(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("order:"))
 async def open_order(callback: CallbackQuery) -> None:
     _, order_ref = callback.data.split(":", 1)
-    services = callback.message.bot["services"]
+    services = get_services()
     order_service = services["order_service"]
     localization = services["localization"]
 

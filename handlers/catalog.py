@@ -3,6 +3,8 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.types import CallbackQuery, Message
 
+from services.runtime_context import get_services
+
 from keyboards.catalog import continents_keyboard, countries_keyboard
 from keyboards.tariff import tariffs_keyboard
 from utils.formatters import format_data_gb
@@ -13,7 +15,7 @@ BUY_TEXTS = {"Buy eSIM", "Купить eSIM"}
 
 
 async def _lang(obj) -> str:
-    services = obj.bot["services"]
+    services = get_services()
     order_service = services["order_service"]
     settings = services["settings"]
     return await order_service.get_user_language(obj.from_user.id, settings.default_language)
@@ -30,7 +32,7 @@ def _tariff_btn(localization, lang: str, tariff: dict) -> str:
 
 
 async def _show_continents(target, lang: str) -> None:
-    services = target.bot["services"]
+    services = get_services()
     localization = services["localization"]
     catalog = services["catalog_service"]
 
@@ -55,7 +57,7 @@ async def buy_callback(callback: CallbackQuery) -> None:
 
 
 async def _show_countries(callback: CallbackQuery, continent_key: str, page: int) -> None:
-    services = callback.message.bot["services"]
+    services = get_services()
     localization = services["localization"]
     catalog = services["catalog_service"]
     lang = await _lang(callback)
@@ -92,7 +94,7 @@ async def countries_page(callback: CallbackQuery) -> None:
 
 
 async def _show_tariffs(callback: CallbackQuery, country_code: str, continent_key: str, page: int) -> None:
-    services = callback.message.bot["services"]
+    services = get_services()
     localization = services["localization"]
     catalog = services["catalog_service"]
     lang = await _lang(callback)
