@@ -96,16 +96,16 @@ class SupplierAPIClient:
         return default
 
     @staticmethod
-    def _normalize_price(value: Any) -> float:
-        price = SupplierAPIClient._to_float(value, 0.0)
-        if price <= 0:
+    def _normalize_price(value: Any, volume_mb: float | None = None) -> float:
+        raw_price = SupplierAPIClient._to_float(value, 0.0)
+        if raw_price <= 0:
             return 0.0
 
-        # Many supplier payloads return integer-like cents:
-        # 470 -> $4.70, 30 -> $0.30, 1220 -> $12.20.
-        # But some payload slices come in x10000 scale:
-        # 38000 -> $3.80, 13000 -> $1.30.
-        # If source value has no decimal separator, use scale heuristics.
+        # Supplier payloads may contain mixed scales in the same response set.
+        # Common variants:
+        # - USD direct (e.g. 4.7)
+        # - cents (e.g. 1220 -> 12.20)
+        # - x10000 fixed-point (e.g. 13000 -> 1.30, 38000 -> 3.80)
         is_integer_like = False
         has_only_zero_fraction = False
         if isinstance(value, int):
@@ -121,18 +121,58 @@ class SupplierAPIClient:
                 frac = raw.split(",", 1)[1]
                 has_only_zero_fraction = frac.strip("0") == ""
 
+        candidates: list[float] = []
         if is_integer_like:
-            # Mixed supplier scales in the same catalog:
-            #   < 10000  -> cents
-            #   >= 10000 -> x10000
-            # This matches real-world rows like 1220=>12.20 and 38000=>3.80.
-            if price >= 10000:
-                price = price / 10000.0
-            else:
-                price = price / 100.0
-        elif has_only_zero_fraction and price >= 100:
-            # Example: "380.00" often means 380 cents -> $3.80 in supplier payloads.
-            price = price / 100.0
+            candidates.extend([raw_price / 10000.0, raw_price / 100.0, raw_price])
+        elif has_only_zero_fraction:
+            candidates.extend([raw_price / 10000.0, raw_price / 100.0, raw_price])
+        else:
+            candidates.append(raw_price)
+
+        # Deduplicate while preserving order.
+        unique_candidates: list[float] = []
+        seen: set[float] = set()
+        for candidate in candidates:
+            rounded = round(candidate, 6)
+            if rounded <= 0:
+                continue
+            if rounded in seen:
+                continue
+            seen.add(rounded)
+            unique_candidates.append(rounded)
+        if not unique_candidates:
+            return 0.0
+
+        data_gb = (float(volume_mb) / 1024.0) if volume_mb and volume_mb > 0 else 0.0
+
+        def _score(candidate: float) -> tuple[int, float]:
+            penalty = 0
+
+            # Global absolute sanity.
+            if candidate < 0.1:
+                penalty += 6
+            elif candidate < 0.3:
+                penalty += 3
+            if candidate > 200:
+                penalty += 6
+            elif candidate > 100:
+                penalty += 3
+
+            if data_gb > 0:
+                per_gb = candidate / data_gb
+                if per_gb < 0.1:
+                    penalty += 6
+                elif per_gb < 0.2:
+                    penalty += 3
+                if per_gb > 80:
+                    penalty += 6
+                elif per_gb > 40:
+                    penalty += 3
+
+            # Prefer smaller positive candidate when penalties equal.
+            return (penalty, candidate)
+
+        price = min(unique_candidates, key=_score)
 
         # Extra guard: some responses may still be scaled by 100 more.
         while price > 500:
@@ -197,13 +237,16 @@ class SupplierAPIClient:
         if not package_code:
             return None
 
-        price = self._normalize_price(self._pick(raw, "price", "costPrice", "salePrice", "amount", "orderPrice", default=0))
-        if price <= 0:
-            return None
-
         volume_raw = self._pick(raw, "volume", "volumeMb", "totalVolume", "data", "dataVolume", "flow", default=0)
         volume_mb = round(self._parse_volume_mb(volume_raw), 4)
         if volume_mb <= 0:
+            return None
+
+        price = self._normalize_price(
+            self._pick(raw, "price", "costPrice", "salePrice", "amount", "orderPrice", default=0),
+            volume_mb=volume_mb,
+        )
+        if price <= 0:
             return None
 
         validity_days = self._parse_validity_days(

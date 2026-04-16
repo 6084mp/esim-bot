@@ -18,10 +18,10 @@ TEXTS = {
     "tariffs_title": "Тарифы для {country}\nСортировка: самые выгодные\n🔥 Самый выгодный — первый",
     "no_countries": "Нет доступных стран.",
     "no_tariffs": "Сейчас нет активных тарифов для этой страны.",
-    "tariff_btn": "📶 {gb} ГБ • {days} дней • {stars} ⭐ (~${usd})",
+    "tariff_btn": "📶 {data} • {days} дней • {stars} ⭐ (~${usd})",
     "tariff_detail": (
         "{flag} {country}\n"
-        "📶 Объем: {gb} ГБ\n"
+        "📶 Объем: {data}\n"
         "📅 Срок: {days} дней\n"
         "💳 Цена: {stars} ⭐ (~${usd})\n"
         "⚡ Доставка: обычно 1–3 минуты\n"

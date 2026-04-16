@@ -18,10 +18,10 @@ TEXTS = {
     "tariffs_title": "Plans for {country}\nSorted: best value first\n🔥 Best value is first",
     "no_countries": "No countries available.",
     "no_tariffs": "No active plans for this country right now.",
-    "tariff_btn": "📶 {gb} GB • {days} days • {stars} ⭐ (~${usd})",
+    "tariff_btn": "📶 {data} • {days} days • {stars} ⭐ (~${usd})",
     "tariff_detail": (
         "{flag} {country}\n"
-        "📶 Data: {gb} GB\n"
+        "📶 Data: {data}\n"
         "📅 Validity: {days} days\n"
         "💳 Price: {stars} ⭐ (~${usd})\n"
         "⚡ Delivery: usually in 1–3 minutes\n"

@@ -8,7 +8,7 @@ from services.runtime_context import get_services
 
 from keyboards.tariff import tariff_detail_keyboard
 from utils.flags import country_flag
-from utils.formatters import format_data_gb, format_usd
+from utils.formatters import format_data_amount, format_data_gb, format_usd
 
 router = Router()
 
@@ -16,6 +16,7 @@ router = Router()
 async def _lang(obj) -> str:
     services = get_services()
     settings = services["settings"]
+    order_service = services["order_service"]
     return await order_service.get_user_language(obj.from_user.id, settings.default_language)
 
 
@@ -41,7 +42,7 @@ async def tariff_detail(callback: CallbackQuery) -> None:
         "tariff_detail",
         flag=country_flag(country_code),
         country=country_name,
-        gb=format_data_gb(tariff["data_amount_gb"]),
+        data=format_data_amount(tariff["data_amount_gb"], lang),
         days=tariff["validity_days"],
         stars=tariff["retail_price_stars"],
         usd=format_usd(tariff["retail_price_usd"]),
