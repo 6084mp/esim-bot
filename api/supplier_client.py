@@ -103,7 +103,9 @@ class SupplierAPIClient:
 
         # Many supplier payloads return integer-like cents:
         # 470 -> $4.70, 30 -> $0.30, 1220 -> $12.20.
-        # If source value has no decimal separator, treat it as cents first.
+        # But some payload slices come in x10000 scale:
+        # 38000 -> $3.80, 13000 -> $1.30.
+        # If source value has no decimal separator, use scale heuristics.
         is_integer_like = False
         has_only_zero_fraction = False
         if isinstance(value, int):
@@ -120,7 +122,14 @@ class SupplierAPIClient:
                 has_only_zero_fraction = frac.strip("0") == ""
 
         if is_integer_like:
-            price = price / 100.0
+            # Mixed supplier scales in the same catalog:
+            #   < 10000  -> cents
+            #   >= 10000 -> x10000
+            # This matches real-world rows like 1220=>12.20 and 38000=>3.80.
+            if price >= 10000:
+                price = price / 10000.0
+            else:
+                price = price / 100.0
         elif has_only_zero_fraction and price >= 100:
             # Example: "380.00" often means 380 cents -> $3.80 in supplier payloads.
             price = price / 100.0
