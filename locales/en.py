@@ -91,6 +91,14 @@ TEXTS = {
         "• Phone model\n"
         "• Screenshots (if possible)"
     ),
+    "support_text_inbot": (
+        "Support in this bot\n"
+        "Please send:\n"
+        "• Order number\n"
+        "• Country\n"
+        "• Phone model\n"
+        "• Screenshots (if possible)"
+    ),
     "support_write": "Write to support",
     "support_prompt": "Write your support message in one text. You can add your order number if available.",
     "support_sent": "Message sent to support. Ticket: {thread_ref}",

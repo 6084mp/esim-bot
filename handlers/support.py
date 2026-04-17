@@ -24,8 +24,13 @@ async def _show_support(target, lang: str) -> None:
     services = get_services()
     localization = services["localization"]
     settings = services["settings"]
+    support_username = (settings.support_username or "").strip()
+    if support_username and support_username != "@support":
+        text = localization.t(lang, "support_text", username=support_username)
+    else:
+        text = localization.t(lang, "support_text_inbot")
     await target.answer(
-        localization.t(lang, "support_text", username=settings.support_username),
+        text,
         reply_markup=support_keyboard(localization, lang),
     )
 
