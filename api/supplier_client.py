@@ -328,9 +328,9 @@ class SupplierAPIClient:
                     if not norm.get("country_code"):
                         norm["country_code"] = cc
 
-                    # Keep exact country and global entries only.
+                    # Keep exact country, country subcodes (e.g. RU-1), and global entries.
                     ncc = str(norm.get("country_code", "")).upper()
-                    if ncc and ncc not in {cc, "GLOBAL", "GL"}:
+                    if ncc and ncc not in {cc, "GLOBAL", "GL"} and not ncc.startswith(f"{cc}-"):
                         continue
                     results.append(norm)
 
@@ -354,7 +354,7 @@ class SupplierAPIClient:
                     continue
 
                 ncc = str(norm.get("country_code", "")).upper()
-                if ncc in {cc, "GLOBAL", "GL"}:
+                if ncc in {cc, "GLOBAL", "GL"} or ncc.startswith(f"{cc}-"):
                     results.append(norm)
             if results:
                 return results

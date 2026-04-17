@@ -52,6 +52,7 @@ class CatalogService:
     }
 
     COUNTRIES: list[CountryItem] = [
+        CountryItem("RU", "RU", "europe", "Russia", "Россия", True),
         CountryItem("GB", "GB", "europe", "United Kingdom", "Великобритания", True),
         CountryItem("DE", "DE", "europe", "Germany", "Германия", True),
         CountryItem("FR", "FR", "europe", "France", "Франция", True),
@@ -147,6 +148,7 @@ class CatalogService:
         self.stale_grace_seconds = stale_grace_seconds
         self.session_factory = session_factory
         self._country_map = {country.code: country for country in self.COUNTRIES}
+        self._dynamic_country_map: dict[str, CountryItem] = {}
         self._refresh_locks: dict[str, asyncio.Lock] = {}
 
     def _get_refresh_lock(self, country_code: str) -> asyncio.Lock:
@@ -180,16 +182,74 @@ class CatalogService:
         return country.name_ru if lang == "ru" else country.name_en
 
     def get_country_by_code(self, country_code: str) -> CountryItem | None:
-        return self._country_map.get(country_code.upper())
+        code = country_code.upper()
+        return self._country_map.get(code) or self._dynamic_country_map.get(code)
 
     def all_country_codes(self) -> list[str]:
-        return [country.code for country in self.COUNTRIES]
+        merged = {country.code for country in self.COUNTRIES}
+        merged.update(self._dynamic_country_map.keys())
+        return sorted(merged)
 
     def popular_country_codes(self) -> list[str]:
-        return [country.code for country in self.COUNTRIES if country.popular]
+        base = [country.code for country in self.COUNTRIES if country.popular]
+        # Dynamic countries are non-popular by default.
+        return base
+
+    @staticmethod
+    def _continent_key_from_region(region: str) -> str | None:
+        value = (region or "").strip().lower()
+        if not value:
+            return None
+        if "global" in value:
+            return "global_plans"
+        if "europe" in value:
+            return "europe"
+        if "middle east" in value or "middle-east" in value or "gulf" in value:
+            return "middle_east"
+        if "north america" in value or "caribbean" in value or "central america" in value:
+            return "north_america"
+        if "south america" in value or "latin america" in value:
+            return "south_america"
+        if "africa" in value:
+            return "africa"
+        if "asia" in value or "oceania" in value or "pacific" in value:
+            return "asia"
+        return None
+
+    async def refresh_locations(self) -> None:
+        try:
+            rows = await self.supplier_client.get_locations()
+        except Exception:
+            logger.exception("Failed to refresh locations from supplier")
+            return
+
+        dynamic: dict[str, CountryItem] = {}
+        for row in rows:
+            code = str(row.get("country_code", "")).upper().strip()
+            if len(code) != 2:
+                continue
+            if code in self._country_map:
+                continue
+
+            continent_key = self._continent_key_from_region(str(row.get("continent", "")))
+            if not continent_key:
+                continue
+
+            name = str(row.get("country_name", code)).strip() or code
+            dynamic[code] = CountryItem(
+                code=code,
+                supplier_code=code,
+                continent=continent_key,
+                name_en=name,
+                name_ru=name,
+                popular=False,
+            )
+
+        self._dynamic_country_map = dynamic
 
     def list_countries(self, continent: str, lang: str) -> list[dict[str, Any]]:
         items = [country for country in self.COUNTRIES if country.continent == continent]
+        items.extend(country for country in self._dynamic_country_map.values() if country.continent == continent)
 
         popular = [item for item in items if item.popular]
         regular = [item for item in items if not item.popular]
@@ -344,9 +404,11 @@ class CatalogService:
         await asyncio.gather(*(_worker(code) for code in country_codes))
 
     async def prewarm_popular(self) -> None:
+        await self.refresh_locations()
         await self.prewarm_country_batch(self.popular_country_codes(), concurrency=4)
 
     async def prewarm_all(self) -> None:
+        await self.refresh_locations()
         await self.prewarm_country_batch(self.all_country_codes(), concurrency=4)
 
     async def get_tariff_by_code(self, country_code: str, package_code: str, force_fresh: bool = False) -> dict[str, Any] | None:
