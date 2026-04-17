@@ -22,6 +22,9 @@ class Settings:
     database_url: str
     supplier_base_url: str
     stars_usd_rate: float
+    catalog_refresh_seconds: int
+    catalog_popular_refresh_seconds: int
+    catalog_stale_grace_seconds: int
 
 
 def _get_bool(name: str, default: bool) -> bool:
@@ -56,4 +59,7 @@ def get_settings() -> Settings:
         database_url=os.getenv("DATABASE_URL", "sqlite+aiosqlite:///esim_bot.db").strip(),
         supplier_base_url=os.getenv("SUPPLIER_BASE_URL", "https://api.esimaccess.com").strip().rstrip("/"),
         stars_usd_rate=float(os.getenv("STAR_TO_USD", "0.013")),
+        catalog_refresh_seconds=int(os.getenv("CATALOG_REFRESH_SECONDS", "1800")),
+        catalog_popular_refresh_seconds=int(os.getenv("CATALOG_POPULAR_REFRESH_SECONDS", "600")),
+        catalog_stale_grace_seconds=int(os.getenv("CATALOG_STALE_GRACE_SECONDS", "86400")),
     )

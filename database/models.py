@@ -54,3 +54,14 @@ class Order(Base):
 
 
 Index("ix_orders_telegram_created", Order.telegram_id, Order.created_at.desc())
+
+
+class CachedTariff(Base):
+    __tablename__ = "cached_tariffs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    country_code: Mapped[str] = mapped_column(String(8), unique=True, index=True, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=False), default=dt.datetime.utcnow, nullable=False)
+    expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=False), nullable=False)

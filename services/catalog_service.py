@@ -1,13 +1,23 @@
 from __future__ import annotations
 
+import asyncio
+import datetime as dt
+import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from api.supplier_client import SupplierAPIClient
+from database.models import CachedTariff
 from services.cache_service import CacheService
 from services.pricing_service import PricingService
 from utils.flags import country_flag
 from utils.pagination import paginate_items
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -127,12 +137,32 @@ class CatalogService:
         cache: CacheService,
         pricing: PricingService,
         cache_ttl_seconds: int,
+        session_factory: async_sessionmaker[AsyncSession],
+        stale_grace_seconds: int = 86400,
     ) -> None:
         self.supplier_client = supplier_client
         self.cache = cache
         self.pricing = pricing
         self.cache_ttl_seconds = cache_ttl_seconds
+        self.stale_grace_seconds = stale_grace_seconds
+        self.session_factory = session_factory
         self._country_map = {country.code: country for country in self.COUNTRIES}
+        self._refresh_locks: dict[str, asyncio.Lock] = {}
+
+    def _get_refresh_lock(self, country_code: str) -> asyncio.Lock:
+        key = country_code.upper()
+        lock = self._refresh_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._refresh_locks[key] = lock
+        return lock
+
+    @staticmethod
+    def _utcnow() -> dt.datetime:
+        return dt.datetime.utcnow()
+
+    def _cache_key(self, country_code: str) -> str:
+        return f"packages:{country_code.upper()}"
 
     def get_continents(self, lang: str, t_func) -> list[dict[str, str]]:
         data: list[dict[str, str]] = []
@@ -151,6 +181,12 @@ class CatalogService:
 
     def get_country_by_code(self, country_code: str) -> CountryItem | None:
         return self._country_map.get(country_code.upper())
+
+    def all_country_codes(self) -> list[str]:
+        return [country.code for country in self.COUNTRIES]
+
+    def popular_country_codes(self) -> list[str]:
+        return [country.code for country in self.COUNTRIES if country.popular]
 
     def list_countries(self, continent: str, lang: str) -> list[dict[str, Any]]:
         items = [country for country in self.COUNTRIES if country.continent == continent]
@@ -177,19 +213,7 @@ class CatalogService:
         countries = self.list_countries(continent, lang)
         return paginate_items(countries, page, page_size)
 
-    async def get_tariffs(self, country_code: str, force_fresh: bool = False) -> list[dict[str, Any]]:
-        country = self.get_country_by_code(country_code)
-        if not country:
-            return []
-
-        cache_key = f"packages:{country.code}"
-        if not force_fresh:
-            cached = self.cache.get(cache_key)
-            if isinstance(cached, list):
-                return cached
-
-        raw_packages = await self.supplier_client.get_packages_by_country(country.supplier_code)
-
+    def _build_tariffs_from_packages(self, country: CountryItem, raw_packages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         tariffs: list[dict[str, Any]] = []
         for package in raw_packages:
             wholesale = float(package["wholesale_price_usd"])
@@ -213,10 +237,117 @@ class CatalogService:
                     "value_score": value_score,
                 }
             )
-
         tariffs.sort(key=lambda x: x["value_score"], reverse=True)
-        self.cache.set(cache_key, tariffs, self.cache_ttl_seconds)
         return tariffs
+
+    async def _save_db_cache(self, country_code: str, tariffs: list[dict[str, Any]]) -> None:
+        now = self._utcnow()
+        expires_at = now + dt.timedelta(seconds=max(1, self.cache_ttl_seconds))
+        payload = json.dumps(tariffs, ensure_ascii=False, separators=(",", ":"))
+        async with self.session_factory() as session:
+            row = await session.scalar(
+                select(CachedTariff).where(CachedTariff.country_code == country_code.upper())
+            )
+            if not row:
+                row = CachedTariff(
+                    country_code=country_code.upper(),
+                    payload_json=payload,
+                    source_count=len(tariffs),
+                    updated_at=now,
+                    expires_at=expires_at,
+                )
+                session.add(row)
+            else:
+                row.payload_json = payload
+                row.source_count = len(tariffs)
+                row.updated_at = now
+                row.expires_at = expires_at
+            await session.commit()
+
+    async def _get_db_cache(self, country_code: str) -> tuple[list[dict[str, Any]], bool]:
+        now = self._utcnow()
+        async with self.session_factory() as session:
+            row = await session.scalar(
+                select(CachedTariff).where(CachedTariff.country_code == country_code.upper())
+            )
+            if not row:
+                return [], False
+            try:
+                payload = json.loads(row.payload_json)
+            except json.JSONDecodeError:
+                return [], False
+            if not isinstance(payload, list):
+                return [], False
+
+            is_fresh = row.expires_at >= now
+            grace_deadline = row.expires_at + dt.timedelta(seconds=max(0, self.stale_grace_seconds))
+            if not is_fresh and grace_deadline < now:
+                return [], False
+            return payload, is_fresh
+
+    async def refresh_country_tariffs(self, country_code: str) -> list[dict[str, Any]]:
+        country = self.get_country_by_code(country_code)
+        if not country:
+            return []
+
+        lock = self._get_refresh_lock(country.code)
+        async with lock:
+            raw_packages = await self.supplier_client.get_packages_by_country(country.supplier_code)
+            tariffs = self._build_tariffs_from_packages(country, raw_packages)
+            self.cache.set(self._cache_key(country.code), tariffs, self.cache_ttl_seconds)
+            await self._save_db_cache(country.code, tariffs)
+            return tariffs
+
+    def trigger_background_refresh(self, country_code: str) -> None:
+        async def _runner() -> None:
+            try:
+                await self.refresh_country_tariffs(country_code)
+            except Exception:
+                logger.exception("Background refresh failed for country=%s", country_code)
+
+        asyncio.create_task(_runner())
+
+    async def get_tariffs(self, country_code: str, force_fresh: bool = False) -> list[dict[str, Any]]:
+        country = self.get_country_by_code(country_code)
+        if not country:
+            return []
+
+        cache_key = self._cache_key(country.code)
+        if force_fresh:
+            return await self.refresh_country_tariffs(country.code)
+
+        cached = self.cache.get(cache_key)
+        if isinstance(cached, list):
+            return cached
+
+        db_cached, is_fresh = await self._get_db_cache(country.code)
+        if db_cached:
+            ttl = self.cache_ttl_seconds if is_fresh else min(120, self.cache_ttl_seconds)
+            self.cache.set(cache_key, db_cached, ttl)
+            if not is_fresh:
+                self.trigger_background_refresh(country.code)
+            return db_cached
+
+        # Hard miss (first call without prewarm): fetch synchronously.
+        return await self.refresh_country_tariffs(country.code)
+
+    async def prewarm_country_batch(self, country_codes: list[str], concurrency: int = 4) -> None:
+        semaphore = asyncio.Semaphore(max(1, concurrency))
+
+        async def _worker(code: str) -> None:
+            async with semaphore:
+                try:
+                    await self.refresh_country_tariffs(code)
+                except Exception:
+                    logger.exception("Prewarm failed for country=%s", code)
+
+        await asyncio.gather(*(_worker(code) for code in country_codes))
+
+    async def prewarm_popular(self) -> None:
+        await self.prewarm_country_batch(self.popular_country_codes(), concurrency=4)
+
+    async def prewarm_all(self) -> None:
+        await self.prewarm_country_batch(self.all_country_codes(), concurrency=4)
 
     async def get_tariff_by_code(self, country_code: str, package_code: str, force_fresh: bool = False) -> dict[str, Any] | None:
         tariffs = await self.get_tariffs(country_code, force_fresh=force_fresh)

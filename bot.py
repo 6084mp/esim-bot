@@ -22,6 +22,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
+logger = logging.getLogger(__name__)
 
 
 def build_services(settings: Settings) -> dict:
@@ -44,6 +45,8 @@ def build_services(settings: Settings) -> dict:
         cache=cache,
         pricing=pricing,
         cache_ttl_seconds=settings.cache_ttl_seconds,
+        session_factory=session_factory,
+        stale_grace_seconds=settings.catalog_stale_grace_seconds,
     )
     compatibility_service = CompatibilityService()
     delivery_service = DeliveryService(
@@ -67,6 +70,34 @@ def build_services(settings: Settings) -> dict:
     }
 
 
+async def _catalog_refresh_loop(catalog_service: CatalogService, settings: Settings) -> None:
+    popular_interval = max(60, settings.catalog_popular_refresh_seconds)
+    full_interval = max(popular_interval, settings.catalog_refresh_seconds)
+
+    try:
+        logger.info("Catalog prewarm: popular countries")
+        await catalog_service.prewarm_popular()
+    except Exception:
+        logger.exception("Initial popular prewarm failed")
+
+    last_full_refresh = 0.0
+
+    while True:
+        try:
+            logger.info("Catalog background refresh: popular countries")
+            await catalog_service.prewarm_popular()
+
+            now = asyncio.get_running_loop().time()
+            if (now - last_full_refresh) >= full_interval:
+                logger.info("Catalog background refresh: all countries")
+                await catalog_service.prewarm_all()
+                last_full_refresh = now
+        except Exception:
+            logger.exception("Catalog refresh loop iteration failed")
+
+        await asyncio.sleep(popular_interval)
+
+
 async def main() -> None:
     settings = get_settings()
     services = build_services(settings)
@@ -78,8 +109,12 @@ async def main() -> None:
 
     dp = Dispatcher()
     register_handlers(dp)
-
-    await dp.start_polling(bot)
+    refresh_task = asyncio.create_task(_catalog_refresh_loop(services["catalog_service"], settings))
+    try:
+        await dp.start_polling(bot)
+    finally:
+        refresh_task.cancel()
+        await asyncio.gather(refresh_task, return_exceptions=True)
 
 
 if __name__ == "__main__":
