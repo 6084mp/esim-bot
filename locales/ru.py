@@ -91,6 +91,23 @@ TEXTS = {
         "• Модель телефона\n"
         "• Скриншоты (если возможно)"
     ),
+    "support_write": "Написать в поддержку",
+    "support_prompt": "Напишите сообщение для поддержки одним сообщением. При желании добавьте номер заказа.",
+    "support_sent": "Сообщение отправлено в поддержку. Номер обращения: {thread_ref}",
+    "support_admin_new": (
+        "🆕 Новое обращение {thread_ref}\n"
+        "User ID: {user_id}\n"
+        "Username: @{username}\n"
+        "Имя: {first_name}\n"
+        "Язык: {lang}\n\n"
+        "{text}\n\n"
+        "Ответьте реплаем на это сообщение, чтобы отправить клиенту анонимно."
+    ),
+    "support_admin_sent": "Ответ отправлен клиенту ({thread_ref}).",
+    "support_admin_unknown_thread": "Не удалось определить обращение. Ответьте реплаем на сообщение обращения или используйте /reply SUP... текст",
+    "support_admin_bad_format": "Формат: /reply SUP123... Текст ответа",
+    "support_user_reply_prefix": "💬 Ответ поддержки по обращению {thread_ref}:\n\n{text}",
+    "support_delivery_failed": "Не удалось доставить ответ клиенту (бот заблокирован или чат недоступен).",
     "about_text": (
         "eSIM Global — сервис туристических eSIM.\n"
         "Покупка и получение прямо в Telegram.\n"

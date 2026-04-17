@@ -5,6 +5,7 @@ from .delivery_service import DeliveryService
 from .localization_service import LocalizationService
 from .order_service import OrderService
 from .pricing_service import PricingService
+from .support_service import SupportService
 
 __all__ = [
     "CacheService",
@@ -14,4 +15,5 @@ __all__ = [
     "LocalizationService",
     "OrderService",
     "PricingService",
+    "SupportService",
 ]

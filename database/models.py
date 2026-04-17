@@ -65,3 +65,36 @@ class CachedTariff(Base):
     source_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=False), default=dt.datetime.utcnow, nullable=False)
     expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+
+
+class SupportThread(Base):
+    __tablename__ = "support_threads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    thread_ref: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    user_telegram_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    username: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    first_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    language: Mapped[str] = mapped_column(String(2), nullable=False, default="en")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=False), default=dt.datetime.utcnow, nullable=False)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=False), default=dt.datetime.utcnow, nullable=False)
+
+
+class SupportMessage(Base):
+    __tablename__ = "support_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    thread_ref: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    sender_role: Mapped[str] = mapped_column(String(16), nullable=False)  # user|admin|system
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=False), default=dt.datetime.utcnow, nullable=False)
+
+
+class SupportAdminMap(Base):
+    __tablename__ = "support_admin_map"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    admin_message_id: Mapped[int] = mapped_column(Integer, unique=True, index=True, nullable=False)
+    thread_ref: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=False), default=dt.datetime.utcnow, nullable=False)

@@ -17,6 +17,7 @@ from services.localization_service import LocalizationService
 from services.order_service import OrderService
 from services.pricing_service import PricingService
 from services.runtime_context import set_services
+from services.support_service import SupportService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,6 +41,7 @@ def build_services(settings: Settings) -> dict:
     )
 
     order_service = OrderService(session_factory=session_factory)
+    support_service = SupportService(session_factory=session_factory)
     catalog_service = CatalogService(
         supplier_client=supplier,
         cache=cache,
@@ -64,6 +66,7 @@ def build_services(settings: Settings) -> dict:
         "cache": cache,
         "supplier_client": supplier,
         "order_service": order_service,
+        "support_service": support_service,
         "catalog_service": catalog_service,
         "compatibility_service": compatibility_service,
         "delivery_service": delivery_service,

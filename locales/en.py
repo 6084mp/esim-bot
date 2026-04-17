@@ -91,6 +91,23 @@ TEXTS = {
         "• Phone model\n"
         "• Screenshots (if possible)"
     ),
+    "support_write": "Write to support",
+    "support_prompt": "Write your support message in one text. You can add your order number if available.",
+    "support_sent": "Message sent to support. Ticket: {thread_ref}",
+    "support_admin_new": (
+        "🆕 New support ticket {thread_ref}\n"
+        "User ID: {user_id}\n"
+        "Username: @{username}\n"
+        "Name: {first_name}\n"
+        "Language: {lang}\n\n"
+        "{text}\n\n"
+        "Reply to this message to respond anonymously to the client."
+    ),
+    "support_admin_sent": "Reply sent to client ({thread_ref}).",
+    "support_admin_unknown_thread": "Cannot detect ticket. Reply to a ticket message or use /reply SUP... your text",
+    "support_admin_bad_format": "Format: /reply SUP123... your reply text",
+    "support_user_reply_prefix": "💬 Support reply for ticket {thread_ref}:\n\n{text}",
+    "support_delivery_failed": "Could not deliver reply to the client (bot blocked or chat unavailable).",
     "about_text": (
         "eSIM Global is a travel eSIM service.\n"
         "Buy and receive eSIM directly in Telegram.\n"
