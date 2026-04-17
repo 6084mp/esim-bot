@@ -15,7 +15,10 @@ from utils.formatters import format_data_amount, format_usd
 router = Router()
 logger = logging.getLogger(__name__)
 
-BUY_TEXTS = {"Buy eSIM", "Купить eSIM"}
+def _is_buy_text(value: str | None) -> bool:
+    if not value:
+        return False
+    return ("Buy eSIM" in value) or ("Купить eSIM" in value)
 
 
 async def _lang(obj) -> str:
@@ -48,7 +51,7 @@ async def _show_continents(target, lang: str) -> None:
     )
 
 
-@router.message(F.text.in_(BUY_TEXTS))
+@router.message(F.text.func(_is_buy_text))
 async def buy_message(message: Message) -> None:
     lang = await _lang(message)
     await _show_continents(message, lang)

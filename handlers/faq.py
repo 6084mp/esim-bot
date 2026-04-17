@@ -8,7 +8,10 @@ from services.runtime_context import get_services
 
 router = Router()
 
-FAQ_TEXTS = {"FAQ"}
+def _is_faq_text(value: str | None) -> bool:
+    if not value:
+        return False
+    return "FAQ" in value
 TOPICS = [
     "what_is",
     "speed",
@@ -40,7 +43,7 @@ async def _faq_menu(target, lang: str) -> None:
     await target.answer(localization.t(lang, "faq_title"), reply_markup=kb.as_markup())
 
 
-@router.message(F.text.in_(FAQ_TEXTS))
+@router.message(F.text.func(_is_faq_text))
 async def faq_message(message: Message) -> None:
     lang = await _lang(message)
     await _faq_menu(message, lang)

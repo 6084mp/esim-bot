@@ -9,7 +9,12 @@ from keyboards.common import support_keyboard
 
 router = Router()
 
-SUPPORT_TEXTS = {"Support", "Поддержка"}
+def _is_support_text(value: str | None) -> bool:
+    if not value:
+        return False
+    return ("Support" in value) or ("Поддержка" in value)
+
+
 PROMPT_TTL_SECONDS = 3600
 
 
@@ -103,7 +108,7 @@ async def _forward_to_admin(user_message: Message, lang: str, text: str) -> None
     await user_message.answer(localization.t(lang, "support_sent", thread_ref=thread.thread_ref))
 
 
-@router.message(F.text.in_(SUPPORT_TEXTS))
+@router.message(F.text.func(_is_support_text))
 async def support_message(message: Message) -> None:
     lang = await _lang(message)
     await _show_support(message, lang)

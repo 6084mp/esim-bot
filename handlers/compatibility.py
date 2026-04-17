@@ -8,7 +8,10 @@ from services.runtime_context import get_services
 
 router = Router()
 
-CHECK_TEXTS = {"Check Device", "Проверить устройство"}
+def _is_check_text(value: str | None) -> bool:
+    if not value:
+        return False
+    return ("Check Device" in value) or ("Проверить устройство" in value)
 
 
 async def _lang(obj) -> str:
@@ -32,7 +35,7 @@ async def _menu(target, lang: str) -> None:
     await target.answer(localization.t(lang, "compat_title"), reply_markup=kb.as_markup())
 
 
-@router.message(F.text.in_(CHECK_TEXTS))
+@router.message(F.text.func(_is_check_text))
 async def compat_message(message: Message) -> None:
     lang = await _lang(message)
     await _menu(message, lang)

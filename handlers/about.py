@@ -7,7 +7,10 @@ from services.runtime_context import get_services
 
 router = Router()
 
-ABOUT_TEXTS = {"About", "О сервисе"}
+def _is_about_text(value: str | None) -> bool:
+    if not value:
+        return False
+    return ("About" in value) or ("О сервисе" in value)
 
 
 async def _lang(obj) -> str:
@@ -17,7 +20,7 @@ async def _lang(obj) -> str:
     return await order_service.get_user_language(obj.from_user.id, settings.default_language)
 
 
-@router.message(F.text.in_(ABOUT_TEXTS))
+@router.message(F.text.func(_is_about_text))
 async def about_message(message: Message) -> None:
     services = get_services()
     localization = services["localization"]

@@ -11,7 +11,10 @@ from utils.formatters import format_data_gb
 
 router = Router()
 
-ORDER_TEXTS = {"My Orders", "Мои заказы"}
+def _is_orders_text(value: str | None) -> bool:
+    if not value:
+        return False
+    return ("My Orders" in value) or ("Мои заказы" in value)
 
 
 async def _lang(obj) -> str:
@@ -49,7 +52,7 @@ async def _show_orders(target, user_id: int, lang: str) -> None:
         await target.answer(text, reply_markup=kb.as_markup())
 
 
-@router.message(F.text.in_(ORDER_TEXTS))
+@router.message(F.text.func(_is_orders_text))
 async def orders_message(message: Message) -> None:
     lang = await _lang(message)
     await _show_orders(message, message.from_user.id, lang)
