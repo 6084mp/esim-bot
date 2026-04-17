@@ -250,11 +250,7 @@ class CatalogService:
     def list_countries(self, continent: str, lang: str) -> list[dict[str, Any]]:
         items = [country for country in self.COUNTRIES if country.continent == continent]
         items.extend(country for country in self._dynamic_country_map.values() if country.continent == continent)
-
-        popular = [item for item in items if item.popular]
-        regular = [item for item in items if not item.popular]
-        regular.sort(key=lambda item: self._country_name(item, lang).lower())
-        ordered = popular + regular
+        ordered = sorted(items, key=lambda item: self._country_name(item, lang).lower())
 
         result: list[dict[str, Any]] = []
         for country in ordered:
