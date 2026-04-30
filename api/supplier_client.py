@@ -386,6 +386,10 @@ class SupplierAPIClient:
                 if results:
                     return results
             except Exception as exc:  # noqa: BLE001
+                msg = str(exc)
+                if "200032" in msg and "Not support the location code" in msg:
+                    logger.info("Supplier does not support location code %s for package/list; skipping", cc)
+                    return []
                 last_error = exc
                 logger.exception("Package list request failed for payload=%s country=%s", payload, cc)
 
@@ -408,6 +412,10 @@ class SupplierAPIClient:
             if results:
                 return results
         except Exception as exc:  # noqa: BLE001
+            msg = str(exc)
+            if "200032" in msg and "Not support the location code" in msg:
+                logger.info("Supplier does not support location code %s in fallback package/list; skipping", cc)
+                return []
             last_error = exc
             logger.exception("Unfiltered package list fallback failed for country=%s", cc)
 
