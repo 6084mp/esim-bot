@@ -72,8 +72,24 @@ class SupplierAPIClient:
         if isinstance(data, list):
             return data
         if isinstance(data, dict):
-            for key in ("list", "records", "rows", "packages", "packageList", "dataList", "items"):
+            for key in (
+                "list",
+                "records",
+                "rows",
+                "packages",
+                "packageList",
+                "dataList",
+                "items",
+                "locationList",
+                "locations",
+                "countryList",
+                "resultList",
+            ):
                 value = data.get(key)
+                if isinstance(value, list):
+                    return value
+            # One more fallback: return first list-typed value from dict.
+            for value in data.values():
                 if isinstance(value, list):
                     return value
         return []
