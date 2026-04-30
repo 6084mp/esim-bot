@@ -35,6 +35,7 @@ TEXTS = {
     "buy_another": "Купить еще eSIM",
     "crypto_unavailable": "Криптооплата временно недоступна.",
     "payment_disabled": "Оплата Telegram Stars временно отключена.",
+    "pricing_blocked": "Этот тариф временно недоступен. Поддержка уже уведомлена.",
     "price_updated": "Цена обновилась: {stars} ⭐ (~${usd}). Подтвердите покупку еще раз.",
     "confirm_price": "Подтвердить новую цену",
     "invoice_title": "Тариф eSIM",

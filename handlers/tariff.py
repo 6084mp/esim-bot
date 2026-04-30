@@ -134,8 +134,27 @@ async def _send_invoice(callback: CallbackQuery, tariff: dict) -> None:
     localization = services["localization"]
     order_service = services["order_service"]
     catalog = services["catalog_service"]
+    settings = services["settings"]
 
     lang = await _lang(callback)
+
+    wholesale = float(tariff["wholesale_price_usd"])
+    retail = float(tariff["retail_price_usd"])
+    if retail <= wholesale:
+        await callback.answer(localization.t(lang, "pricing_blocked"), show_alert=True)
+        try:
+            await callback.bot.send_message(
+                settings.admin_chat_id,
+                (
+                    f"[pricing-hard-stop] user={callback.from_user.id} "
+                    f"country={tariff.get('country_code')} package={tariff.get('package_code')} "
+                    f"wholesale={wholesale:.4f} retail={retail:.4f}"
+                ),
+            )
+        except Exception:
+            pass
+        return
+
     country = catalog.get_country_by_code(tariff["country_code"])
     country_name = country.name_ru if (country and lang == "ru") else (country.name_en if country else tariff["country_code"])
 

@@ -274,6 +274,15 @@ class CatalogService:
         for package in raw_packages:
             wholesale = float(package["wholesale_price_usd"])
             retail_usd = self.pricing.calculate_retail_usd(wholesale, country.code)
+            if retail_usd <= wholesale:
+                logger.error(
+                    "Pricing hard-stop in catalog package=%s country=%s wholesale=%.4f retail=%.4f",
+                    package.get("package_code", ""),
+                    country.code,
+                    wholesale,
+                    retail_usd,
+                )
+                continue
             stars = self.pricing.usd_to_stars(retail_usd)
             data_gb = round(float(package["volume_mb"]) / 1024, 3)
             validity_days = int(package["validity_days"])

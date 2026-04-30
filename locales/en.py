@@ -35,6 +35,7 @@ TEXTS = {
     "buy_another": "Buy another eSIM",
     "crypto_unavailable": "Crypto payment is temporarily unavailable.",
     "payment_disabled": "Telegram Stars payment is temporarily disabled.",
+    "pricing_blocked": "This plan is temporarily unavailable. Support has been notified.",
     "price_updated": "Price was updated to {stars} ⭐ (~${usd}). Please confirm purchase again.",
     "confirm_price": "Confirm updated price",
     "invoice_title": "eSIM plan",
