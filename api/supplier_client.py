@@ -309,11 +309,14 @@ class SupplierAPIClient:
     async def get_locations(self) -> list[dict[str, Any]]:
         raw = await self._request("POST", "/api/v1/open/location/list", {})
         obj = self._extract_obj(raw)
-        if not isinstance(obj, list):
+        raw_list = self._extract_list_payload(obj)
+        if not raw_list and isinstance(obj, list):
+            raw_list = obj
+        if not raw_list:
             raise SupplierAPIError("Unexpected location response shape")
 
         normalized: list[dict[str, Any]] = []
-        for item in obj:
+        for item in raw_list:
             if not isinstance(item, dict):
                 continue
             code = str(self._pick(item, "locationCode", "countryCode", "code", default="")).upper()

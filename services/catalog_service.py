@@ -60,6 +60,7 @@ class CatalogService:
         CountryItem("ES", "ES", "europe", "Spain", "Испания", True),
         CountryItem("TR", "TR", "europe", "Turkey", "Турция", True),
         CountryItem("AT", "AT", "europe", "Austria", "Австрия", False),
+        CountryItem("BY", "BY", "europe", "Belarus", "Беларусь", False),
         CountryItem("BE", "BE", "europe", "Belgium", "Бельгия", False),
         CountryItem("BG", "BG", "europe", "Bulgaria", "Болгария", False),
         CountryItem("CH", "CH", "europe", "Switzerland", "Швейцария", False),
