@@ -232,6 +232,39 @@ class SupplierAPIClient:
                 return data[key]
         return default
 
+    def _extract_safe_wholesale_price(self, raw: dict[str, Any], volume_mb: float) -> float:
+        # Safety-first rule:
+        # normalize all possible supplier price fields and use the maximum.
+        # This prevents accidental underpricing when one field is scaled differently.
+        price_fields = ("price", "costPrice", "salePrice", "amount", "orderPrice")
+        candidates: list[float] = []
+        for field in price_fields:
+            value = raw.get(field)
+            if value in (None, ""):
+                continue
+            normalized = self._normalize_price(value, volume_mb=volume_mb)
+            if normalized > 0:
+                candidates.append(normalized)
+
+        if not candidates:
+            return 0.0
+
+        safe_price = max(candidates)
+        if len(candidates) >= 2:
+            low = min(candidates)
+            high = max(candidates)
+            # Log large spreads for diagnostics without exposing secrets.
+            if low > 0 and (high / low) >= 1.8:
+                logger.warning(
+                    "Supplier price spread detected package=%s country=%s low=%.4f high=%.4f fields=%s",
+                    str(raw.get("packageCode") or raw.get("packageNo") or raw.get("id") or ""),
+                    str(raw.get("locationCode") or raw.get("countryCode") or ""),
+                    low,
+                    high,
+                    [field for field in price_fields if raw.get(field) not in (None, "")],
+                )
+        return safe_price
+
     def _normalize_package(self, raw: dict[str, Any]) -> dict[str, Any] | None:
         package_code = str(self._pick(raw, "packageCode", "packageNo", "id", "code", default="")).strip()
         if not package_code:
@@ -242,10 +275,7 @@ class SupplierAPIClient:
         if volume_mb <= 0:
             return None
 
-        price = self._normalize_price(
-            self._pick(raw, "price", "costPrice", "salePrice", "amount", "orderPrice", default=0),
-            volume_mb=volume_mb,
-        )
+        price = self._extract_safe_wholesale_price(raw, volume_mb=volume_mb)
         if price <= 0:
             return None
 
