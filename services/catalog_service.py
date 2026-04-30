@@ -38,6 +38,7 @@ class CatalogService:
         "south_america",
         "africa",
         "middle_east",
+        "other",
         "global_plans",
     ]
 
@@ -48,6 +49,7 @@ class CatalogService:
         "south_america": "🌎",
         "africa": "🌍",
         "middle_east": "🕌",
+        "other": "🧭",
         "global_plans": "🌐",
     }
 
@@ -248,6 +250,52 @@ class CatalogService:
 
         self._dynamic_country_map = dynamic
 
+    async def refresh_dynamic_countries_from_packages(self) -> None:
+        """Fallback source of country coverage when location/list is incomplete."""
+        try:
+            raw = await self.supplier_client._request("POST", "/api/v1/open/package/list", {})
+            obj = self.supplier_client._extract_obj(raw)
+            rows = self.supplier_client._extract_list_payload(obj) if not isinstance(obj, list) else obj
+        except Exception:
+            logger.exception("Failed to build dynamic countries from package list")
+            return
+
+        merged = dict(self._dynamic_country_map)
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            norm = self.supplier_client._normalize_package(item)
+            if not norm:
+                continue
+
+            raw_code = str(norm.get("country_code", "")).upper().strip()
+            if not raw_code:
+                continue
+
+            if raw_code in {"GLOBAL", "GL"}:
+                base_code = "GL"
+            else:
+                # Accept country subcodes like AF-29, HK-3 etc.
+                base_code = raw_code.split("-", 1)[0]
+
+            if len(base_code) != 2:
+                continue
+            if base_code in self._country_map:
+                continue
+
+            country_name = str(norm.get("country_name", base_code)).strip() or base_code
+            # If continent unknown, still include country under "other".
+            merged[base_code] = CountryItem(
+                code=base_code,
+                supplier_code=base_code,
+                continent="other",
+                name_en=country_name,
+                name_ru=country_name,
+                popular=False,
+            )
+
+        self._dynamic_country_map = merged
+
     def list_countries(self, continent: str, lang: str) -> list[dict[str, Any]]:
         items = [country for country in self.COUNTRIES if country.continent == continent]
         items.extend(country for country in self._dynamic_country_map.values() if country.continent == continent)
@@ -411,10 +459,12 @@ class CatalogService:
 
     async def prewarm_popular(self) -> None:
         await self.refresh_locations()
+        await self.refresh_dynamic_countries_from_packages()
         await self.prewarm_country_batch(self.popular_country_codes(), concurrency=4)
 
     async def prewarm_all(self) -> None:
         await self.refresh_locations()
+        await self.refresh_dynamic_countries_from_packages()
         await self.prewarm_country_batch(self.all_country_codes(), concurrency=4)
 
     async def get_tariff_by_code(self, country_code: str, package_code: str, force_fresh: bool = False) -> dict[str, Any] | None:

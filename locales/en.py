@@ -163,6 +163,7 @@ TEXTS = {
     "south_america": "South America",
     "africa": "Africa",
     "middle_east": "Middle East",
+    "other": "Other Countries",
     "unknown_error": "Something went wrong. Please try again.",
     "loading": "Loading...",
 }
