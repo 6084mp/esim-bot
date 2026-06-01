@@ -494,23 +494,64 @@ class SupplierAPIClient:
         raise SupplierAPIError(f"All purchase payload formats failed: {last_error}")
 
     async def get_esim_order_details(self, supplier_order_no: str) -> dict[str, Any]:
-        payload = {"orderNo": supplier_order_no}
-        raw = await self._request("POST", "/api/v1/open/esim/query", payload)
-        obj = self._extract_obj(raw)
-        if not isinstance(obj, dict):
-            raise SupplierAPIError("Unexpected query response")
+        payload_attempts: list[dict[str, Any]] = [
+            {
+                "orderNo": supplier_order_no,
+                "pager": {"pageNum": 1, "pageSize": 20},
+            },
+            {
+                "orderNo": supplier_order_no,
+                "pager": {"pageNo": 1, "pageSize": 20},
+            },
+            {
+                "transactionId": supplier_order_no,
+                "pager": {"pageNum": 1, "pageSize": 20},
+            },
+            {
+                "transactionId": supplier_order_no,
+                "pager": {"pageNo": 1, "pageSize": 20},
+            },
+            {
+                "orderNo": supplier_order_no,
+            },
+        ]
 
-        qr_url = self._pick(obj, "qrCodeUrl", "qrUrl", "esimQrUrl", default=None)
-        activation_code = self._pick(obj, "activationCode", "ac", "code", default=None)
-        smdp = self._pick(obj, "smdpAddress", "smdp", "smdpAddressCode", default=None)
-        iccid = self._pick(obj, "iccid", "esimIccid", default=None)
+        last_error: Exception | None = None
+        for payload in payload_attempts:
+            try:
+                raw = await self._request("POST", "/api/v1/open/esim/query", payload)
+                obj = self._extract_obj(raw)
 
-        ready = bool(qr_url or (activation_code and smdp))
-        return {
-            "ready": ready,
-            "iccid": iccid,
-            "qr_url": qr_url,
-            "smdp": smdp,
-            "activation_code": activation_code,
-            "raw": obj,
-        }
+                if isinstance(obj, list):
+                    obj = obj[0] if obj else {}
+                if isinstance(obj, dict):
+                    list_payload = self._extract_list_payload(obj)
+                    if list_payload and isinstance(list_payload[0], dict):
+                        obj = list_payload[0]
+                if not isinstance(obj, dict):
+                    raise SupplierAPIError("Unexpected query response")
+
+                qr_url = self._pick(obj, "qrCodeUrl", "qrUrl", "esimQrUrl", default=None)
+                activation_code = self._pick(obj, "activationCode", "ac", "code", default=None)
+                smdp = self._pick(obj, "smdpAddress", "smdp", "smdpAddressCode", default=None)
+                iccid = self._pick(obj, "iccid", "esimIccid", default=None)
+
+                ready = bool(qr_url or (activation_code and smdp))
+                return {
+                    "ready": ready,
+                    "iccid": iccid,
+                    "qr_url": qr_url,
+                    "smdp": smdp,
+                    "activation_code": activation_code,
+                    "raw": obj,
+                }
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                logger.warning(
+                    "Query attempt failed supplier_order_no=%s payload_keys=%s err=%s",
+                    supplier_order_no,
+                    sorted(payload.keys()),
+                    exc,
+                )
+
+        raise SupplierAPIError(f"Failed to query eSIM details: {last_error}")
