@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
+import uuid
 from typing import Any
 
 import aiohttp
@@ -248,6 +250,34 @@ class SupplierAPIClient:
                 return data[key]
         return default
 
+    @staticmethod
+    def _extract_order_no_any(data: Any) -> str:
+        if isinstance(data, dict):
+            for key in ("orderNo", "transactionId", "id"):
+                value = data.get(key)
+                if value not in (None, ""):
+                    return str(value)
+            for list_key in ("orderNoList", "orderList", "orders"):
+                value = data.get(list_key)
+                if isinstance(value, list) and value:
+                    first = value[0]
+                    if isinstance(first, dict):
+                        nested = SupplierAPIClient._extract_order_no_any(first)
+                        if nested:
+                            return nested
+                    if first not in (None, ""):
+                        return str(first)
+            for value in data.values():
+                nested = SupplierAPIClient._extract_order_no_any(value)
+                if nested:
+                    return nested
+        elif isinstance(data, list):
+            for item in data:
+                nested = SupplierAPIClient._extract_order_no_any(item)
+                if nested:
+                    return nested
+        return ""
+
     def _extract_safe_wholesale_price(self, raw: dict[str, Any], volume_mb: float) -> float:
         # Safety-first rule:
         # normalize all possible supplier price fields and use the maximum.
@@ -424,21 +454,44 @@ class SupplierAPIClient:
         return []
 
     async def purchase_esim(self, package_code: str, quantity: int = 1, order_ref: str | None = None) -> dict[str, Any]:
-        payload: dict[str, Any] = {
-            "packageCode": package_code,
-            "quantity": quantity,
-        }
-        if order_ref:
-            payload["outTradeNo"] = order_ref
+        txid = order_ref or f"TX-{int(time.time())}-{uuid.uuid4().hex[:10].upper()}"
+        pkg_info = [{"packageCode": package_code, "count": int(quantity)}]
+        payload_attempts: list[dict[str, Any]] = [
+            {
+                "transactionId": txid,
+                "packageInfoList": pkg_info,
+            },
+            {
+                "transactionId": txid,
+                "outTradeNo": txid,
+                "packageInfoList": pkg_info,
+            },
+            {
+                "transactionId": txid,
+                "packageCode": package_code,
+                "quantity": int(quantity),
+            },
+            {
+                "outTradeNo": txid,
+                "packageCode": package_code,
+                "quantity": int(quantity),
+            },
+        ]
 
-        raw = await self._request("POST", "/api/v1/open/esim/order", payload)
-        obj = self._extract_obj(raw)
-        if not isinstance(obj, dict):
-            raise SupplierAPIError("Unexpected purchase response")
-        return {
-            "supplier_order_no": str(self._pick(obj, "orderNo", "orderNoList", "transactionId", "id", default="")),
-            "raw": obj,
-        }
+        last_error: Exception | None = None
+        for payload in payload_attempts:
+            try:
+                raw = await self._request("POST", "/api/v1/open/esim/order", payload)
+                obj = self._extract_obj(raw)
+                order_no = self._extract_order_no_any(obj)
+                if not order_no:
+                    raise SupplierAPIError("Supplier did not return order number")
+                return {"supplier_order_no": order_no, "raw": obj}
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                logger.warning("Purchase attempt failed for package=%s payload_keys=%s err=%s", package_code, sorted(payload.keys()), exc)
+
+        raise SupplierAPIError(f"All purchase payload formats failed: {last_error}")
 
     async def get_esim_order_details(self, supplier_order_no: str) -> dict[str, Any]:
         payload = {"orderNo": supplier_order_no}
