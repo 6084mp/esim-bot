@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import CallbackQuery, LabeledPrice
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
@@ -18,6 +19,10 @@ async def _lang(obj) -> str:
     settings = services["settings"]
     order_service = services["order_service"]
     return await order_service.get_user_language(obj.from_user.id, settings.default_language)
+
+
+def _is_free_user(user_id: int, settings) -> bool:
+    return user_id == settings.admin_chat_id or user_id in settings.free_order_user_ids
 
 
 @router.callback_query(F.data.startswith("tariff:"))
@@ -80,6 +85,10 @@ async def pay_stars(callback: CallbackQuery) -> None:
 
     lang = await _lang(callback)
 
+    if _is_free_user(callback.from_user.id, settings):
+        await _process_free_order(callback, fresh_only=True, country_code=country_code, package_code=package_code)
+        return
+
     if not settings.stars_payment_enabled:
         await callback.answer(localization.t(lang, "payment_disabled"), show_alert=True)
         return
@@ -126,7 +135,54 @@ async def pay_confirm(callback: CallbackQuery) -> None:
         await callback.answer(localization.t(lang, "no_tariffs"), show_alert=True)
         return
 
+    settings = get_services()["settings"]
+    if _is_free_user(callback.from_user.id, settings):
+        await _process_free_order(callback, fresh_tariff=fresh_tariff)
+        return
+
     await _send_invoice(callback, fresh_tariff)
+
+
+async def _process_free_order(
+    callback: CallbackQuery,
+    fresh_only: bool = False,
+    country_code: str | None = None,
+    package_code: str | None = None,
+    fresh_tariff: dict | None = None,
+) -> None:
+    services = get_services()
+    localization = services["localization"]
+    order_service = services["order_service"]
+    delivery_service = services["delivery_service"]
+    catalog = services["catalog_service"]
+    settings = services["settings"]
+
+    if not _is_free_user(callback.from_user.id, settings):
+        return
+
+    lang = await _lang(callback)
+
+    tariff = fresh_tariff
+    if tariff is None:
+        if not country_code or not package_code:
+            await callback.answer(localization.t(lang, "no_tariffs"), show_alert=True)
+            return
+        tariff = await catalog.get_tariff_by_code(country_code, package_code, force_fresh=True)
+        if not tariff:
+            await callback.answer(localization.t(lang, "no_tariffs"), show_alert=True)
+            return
+
+    order = await order_service.create_pending_order(callback.from_user.id, tariff)
+    paid_order = await order_service.set_order_paid(order.order_ref)
+    if not paid_order:
+        await callback.answer(localization.t(lang, "unknown_error"), show_alert=True)
+        return
+
+    await callback.message.answer(localization.t(lang, "payment_test_mode"))
+    await callback.message.answer(localization.t(lang, "delivery_wait"))
+    await callback.answer()
+    import asyncio
+    asyncio.create_task(delivery_service.process_paid_order(callback.bot, paid_order.order_ref, lang))
 
 
 async def _send_invoice(callback: CallbackQuery, tariff: dict) -> None:
@@ -159,18 +215,37 @@ async def _send_invoice(callback: CallbackQuery, tariff: dict) -> None:
     country_name = country.name_ru if (country and lang == "ru") else (country.name_en if country else tariff["country_code"])
 
     order = await order_service.create_pending_order(callback.from_user.id, tariff)
+    stars_amount = max(1, int(tariff["retail_price_stars"]))
 
-    await callback.message.answer_invoice(
-        title=localization.t(lang, "invoice_title"),
-        description=localization.t(
-            lang,
-            "invoice_description",
-            country=country_name,
-            gb=format_data_gb(tariff["data_amount_gb"]),
-            days=tariff["validity_days"],
-        ),
-        payload=order.order_ref,
-        currency="XTR",
-        prices=[LabeledPrice(label="eSIM", amount=tariff["retail_price_stars"])],
-    )
-    await callback.answer()
+    try:
+        await callback.message.answer_invoice(
+            title=localization.t(lang, "invoice_title"),
+            description=localization.t(
+                lang,
+                "invoice_description",
+                country=country_name,
+                gb=format_data_gb(tariff["data_amount_gb"]),
+                days=tariff["validity_days"],
+            ),
+            payload=order.order_ref,
+            currency="XTR",
+            prices=[LabeledPrice(label="eSIM", amount=stars_amount)],
+        )
+        await callback.answer()
+    except TelegramBadRequest as e:
+        await callback.answer(localization.t(lang, "payment_provider_unavailable"), show_alert=True)
+        try:
+            await callback.bot.send_message(
+                settings.admin_chat_id,
+                (
+                    "[stars-invoice-error] "
+                    f"user={callback.from_user.id} "
+                    f"order_ref={order.order_ref} "
+                    f"country={tariff.get('country_code')} "
+                    f"package={tariff.get('package_code')} "
+                    f"stars={stars_amount} "
+                    f"error={str(e)}"
+                ),
+            )
+        except Exception:
+            pass
